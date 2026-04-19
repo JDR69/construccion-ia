@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     # Third-party
     "rest_framework",
     "corsheaders",
+    "rest_framework_simplejwt",
 
     # Local apps
     "core.apps.CoreConfig",
@@ -70,7 +71,7 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("POSTGRES_DB", "postgres"),
+        "NAME": os.getenv("POSTGRES_DB", "construccionIA"),
         "USER": os.getenv("POSTGRES_USER", "postgres"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
         "HOST": os.getenv("POSTGRES_HOST", "127.0.0.1"),
@@ -97,12 +98,16 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
 # Custom user model (define BEFORE first migration)
-AUTH_USER_MODEL = "usuarios.User"
+AUTH_USER_MODEL = "usuarios.Usuario"
 
 # DRF
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": [],
-    "DEFAULT_PERMISSION_CLASSES": [],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
 }
 
 # CORS (dev-friendly)

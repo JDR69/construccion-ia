@@ -1,40 +1,31 @@
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import User
+from .models import Usuario
 
 
-class UserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=False, allow_blank=False)
+class RegistroSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
 
     class Meta:
-        model = User
+        model = Usuario
         fields = [
             "id",
-            "email",
+            "nombre",
+            "apellido",
+            "correo",
             "password",
-            "first_name",
-            "last_name",
-            "is_active",
-            "is_staff",
-            "date_joined",
+            "fechaNacimiento",
         ]
-        read_only_fields = ["id", "is_staff", "date_joined"]
+        read_only_fields = ["id"]
 
     def create(self, validated_data):
-        password = validated_data.pop("password", None)
-        user = User(**validated_data)
-        if password:
-            user.set_password(password)
-        else:
-            user.set_unusable_password()
-        user.save()
-        return user
+        password = validated_data.pop("password")
+        usuario = Usuario(**validated_data)
+        usuario.set_password(password)
+        usuario.save()
+        return usuario
 
-    def update(self, instance, validated_data):
-        password = validated_data.pop("password", None)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        if password:
-            instance.set_password(password)
-        instance.save()
-        return instance
+
+class LoginSerializer(TokenObtainPairSerializer):
+    username_field = "correo"

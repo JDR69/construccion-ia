@@ -8,11 +8,9 @@ class ProyectoSerializer(serializers.ModelSerializer):
         model = Proyecto
         fields = [
             "id",
-            "propietario",
-            "nombre",
+            "idUsuario",
+            "titulo",
             "descripcion",
-            "ubicacion",
-            "creado_en",
-            "actualizado_en",
+            "fechaCreacion",
         ]
-        read_only_fields = ["id", "creado_en", "actualizado_en"]
+        read_only_fields = ["id", "idUsuario", "fechaCreacion"]

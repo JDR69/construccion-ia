@@ -5,6 +5,6 @@ from .models import Proyecto
 
 @admin.register(Proyecto)
 class ProyectoAdmin(admin.ModelAdmin):
-    list_display = ("id", "nombre", "propietario", "creado_en")
-    search_fields = ("nombre", "ubicacion", "propietario__email")
-    list_select_related = ("propietario",)
+    list_display = ("id", "titulo", "idUsuario", "fechaCreacion")
+    search_fields = ("titulo", "descripcion", "idUsuario__correo")
+    list_select_related = ("idUsuario",)
