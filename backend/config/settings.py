@@ -28,7 +28,6 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
 
     # Local apps
-    "core.apps.CoreConfig",
     "modules.usuarios.apps.UsuariosConfig",
     "modules.proyectos.apps.ProyectosConfig",
     "modules.planos.apps.PlanosConfig",
