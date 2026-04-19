@@ -23,3 +23,8 @@ python manage.py showmigrations core
 python manage.py createsuperuser
 python manage.py runserver
 ```
+
+
+
+""Instalar en consola"":
+
