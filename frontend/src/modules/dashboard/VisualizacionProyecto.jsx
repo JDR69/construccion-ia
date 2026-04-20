@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { http } from '../api/config'
-import { Button } from '../ui/Button'
-import { Table } from '../ui/Table'
+import { http } from '../../api/config'
+import { Button } from '../../ui/Button'
+import { Table } from '../../ui/Table'
 
 function toErrorMessage(err) {
 	return (
