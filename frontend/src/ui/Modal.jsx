@@ -1,30 +1,40 @@
+/* ─────────────────────────────────────────────
+   Modal — Diálogo emergente reutilizable
+   Tema oscuro con glassmorphism sutil
+   ───────────────────────────────────────────── */
+
 import { Button } from './Button'
 
 export function Modal({ open, title, children, onClose, footer }) {
+  /* No renderiza nada si está cerrado */
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="absolute inset-0 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xl">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800">
-            <h3 className="text-base font-semibold text-slate-900 dark:text-white">
-              {title}
-            </h3>
-            <Button variant="secondary" size="sm" onClick={onClose}>
-              Cerrar
-            </Button>
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Fondo oscuro semitransparente */}
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={onClose}
+      />
 
-          <div className="p-5">{children}</div>
+      {/* Cuerpo del modal */}
+      <div className="relative w-full max-w-lg rounded-2xl border border-white/10 bg-[#0d1526] shadow-2xl shadow-black/50">
 
-          {footer && (
-            <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-800">
-              {footer}
-            </div>
-          )}
+        {/* Encabezado con título y botón cerrar */}
+        <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
+          <h3 className="text-base font-semibold text-white">{title}</h3>
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            Cerrar
+          </Button>
         </div>
+
+        {/* Contenido hijo */}
+        <div className="p-5">{children}</div>
+
+        {/* Footer con acciones */}
+        {footer && (
+          <div className="border-t border-white/8 px-5 py-4">{footer}</div>
+        )}
       </div>
     </div>
   )

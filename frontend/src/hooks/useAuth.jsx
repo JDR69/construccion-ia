@@ -6,7 +6,7 @@ import {
   useState,
 } from 'react'
 
-import { login as loginApi, me as meApi } from '../api/auth'
+import { login as loginApi, me as meApi, register as registerApi } from '../api/auth'
 
 const ACCESS_TOKEN_KEY = 'dpap.access'
 const REFRESH_TOKEN_KEY = 'dpap.refresh'
@@ -41,7 +41,6 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => safeGet(ACCESS_TOKEN_KEY))
   const [user, setUser] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState('')
 
   const isAuthenticated = Boolean(token)
 
@@ -53,7 +52,6 @@ export function AuthProvider({ children }) {
 
     let alive = true
     setIsLoading(true)
-    setError('')
 
     meApi()
       .then((u) => {
@@ -79,7 +77,6 @@ export function AuthProvider({ children }) {
 
   const login = async ({ correo, password }) => {
     setIsLoading(true)
-    setError('')
     try {
       const data = await loginApi({ correo, password })
       if (data?.access) {
@@ -88,10 +85,16 @@ export function AuthProvider({ children }) {
       }
       if (data?.refresh) safeSet(REFRESH_TOKEN_KEY, data.refresh)
       return data
-    } catch (err) {
-      const msg = err?.response?.data?.detail || 'Credenciales inválidas'
-      setError(String(msg))
-      throw err
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Registro reutilizable para cualquier vista de auth.
+  const register = async (payload) => {
+    setIsLoading(true)
+    try {
+      return await registerApi(payload)
     } finally {
       setIsLoading(false)
     }
@@ -110,11 +113,11 @@ export function AuthProvider({ children }) {
       user,
       isAuthenticated,
       isLoading,
-      error,
       login,
+      register,
       logout,
     }),
-    [token, user, isAuthenticated, isLoading, error]
+    [token, user, isAuthenticated, isLoading]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

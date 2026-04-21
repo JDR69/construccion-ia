@@ -1,24 +1,40 @@
+/* ─────────────────────────────────────────────
+   Input — Campo de texto reutilizable
+   Diseño oscuro con borde brillante al focus
+   ───────────────────────────────────────────── */
+
 export function Input({ label, className = '', error, ...props }) {
   return (
     <label className="block">
+      {/* Etiqueta superior */}
       {label && (
-        <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+        <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">
           {label}
-        </div>
+        </span>
       )}
+
+      {/* Campo de entrada */}
       <input
         className={[
-          'w-full h-10 rounded-lg px-3',
-          'bg-white dark:bg-slate-900',
-          'text-slate-900 dark:text-white',
-          'border border-slate-200 dark:border-slate-700',
-          'outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500',
+          'w-full h-11 rounded-xl px-4',
+          /* Fondo semitransparente oscuro */
+          'bg-white/5 text-white',
+          /* Borde tenue que resalta al focus */
+          'border border-white/10',
+          'outline-none transition-all duration-200',
+          'focus:border-sky-500/60 focus:ring-2 focus:ring-sky-500/25',
+          /* Placeholder gris suave */
+          'placeholder:text-slate-500',
+          /* Error visual */
+          error ? 'border-rose-500/60 focus:ring-rose-500/25' : '',
           className,
         ].join(' ')}
         {...props}
       />
+
+      {/* Mensaje de error */}
       {error && (
-        <div className="mt-1 text-xs text-red-600 dark:text-red-300">{error}</div>
+        <span className="mt-1.5 block text-xs text-rose-400">{error}</span>
       )}
     </label>
   )

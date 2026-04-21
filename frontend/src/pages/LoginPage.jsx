@@ -1,63 +1,98 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+/* ─────────────────────────────────────────────
+   LoginPage — Formulario de inicio de sesión
+   Usa AuthLayout con diseño futurista
+   ───────────────────────────────────────────── */
 
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+
+import { AuthLayout } from '../components/auth/AuthLayout'
 import { useAuth } from '../hooks/useAuth.jsx'
+import { useToast } from '../hooks/useToast.jsx'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 
 export function LoginPage() {
   const navigate = useNavigate()
-  const { login, isLoading, error } = useAuth()
-  const [correo, setCorreo] = useState('')
-  const [password, setPassword] = useState('')
+  const { login, isLoading } = useAuth()
+  const { pushToast } = useToast()
 
+  const [correo, setCorreo]       = useState('')
+  const [password, setPassword]   = useState('')
+  const [errors, setErrors]       = useState({})
+
+  /* Valida campos antes de enviar al backend */
   const submit = async (e) => {
     e.preventDefault()
-    await login({ correo, password })
-    navigate('/')
+
+    /* Validación local mínima */
+    const nextErrors = {}
+    if (!correo.trim()) nextErrors.correo   = 'El correo es obligatorio.'
+    if (!password)      nextErrors.password = 'La contraseña es obligatoria.'
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors)
+      pushToast({ type: 'warning', title: 'Faltan datos', message: 'Completa los campos requeridos.' })
+      return
+    }
+
+    setErrors({})
+
+    try {
+      /* Intenta login con el backend */
+      await login({ correo: correo.trim().toLowerCase(), password })
+      pushToast({ type: 'success', title: 'Sesión iniciada', message: 'Bienvenido al panel de proyectos.' })
+      navigate('/')
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Credenciales inválidas.'
+      pushToast({ type: 'error', title: 'Acceso denegado', message: String(msg) })
+    }
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl bg-white/5 border border-white/10 p-6">
-          <div className="text-lg font-semibold">Iniciar sesión</div>
-          <div className="mt-1 text-sm text-white/60">
-            Usa tu correo y contraseña.
-          </div>
+    <AuthLayout
+      title="Iniciar sesión"
+      subtitle="Accede con tu correo corporativo para gestionar proyectos y presupuestos."
+      footer={
+        <>
+          ¿No tienes cuenta?{' '}
+          <Link to="/register" className="font-semibold text-sky-400 hover:text-sky-300 transition-colors">
+            Regístrate aquí
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={submit} className="space-y-5">
+        <Input
+          label="Correo electrónico"
+          type="email"
+          value={correo}
+          onChange={(e) => {
+            setCorreo(e.target.value)
+            setErrors((prev) => ({ ...prev, correo: '' }))
+          }}
+          placeholder="nombre@empresa.com"
+          error={errors.correo}
+          required
+        />
 
-          {error && (
-            <div className="mt-4 text-sm text-red-200 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
-              {error}
-            </div>
-          )}
+        <Input
+          label="Contraseña"
+          type="password"
+          value={password}
+          onChange={(e) => {
+            setPassword(e.target.value)
+            setErrors((prev) => ({ ...prev, password: '' }))
+          }}
+          placeholder="Tu contraseña"
+          error={errors.password}
+          required
+        />
 
-          <form onSubmit={submit} className="mt-5 space-y-4">
-            <Input
-              label="Correo"
-              type="email"
-              value={correo}
-              onChange={(e) => setCorreo(e.target.value)}
-              placeholder="tu@email.com"
-              required
-            />
-            <Input
-              label="Contraseña"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••"
-              required
-            />
-
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? 'Ingresando…' : 'Ingresar'}
-            </Button>
-          </form>
-
-          <div className="mt-4 text-xs text-white/50">
-            Tip: si no tienes usuario, créalo en backend con `/api/auth/register/`.
-          </div>
-        </div>
-    </div>
+        <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
+          {isLoading ? 'Validando acceso…' : 'Ingresar al sistema'}
+        </Button>
+      </form>
+    </AuthLayout>
   )
 }
