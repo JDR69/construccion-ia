@@ -3,6 +3,10 @@ const VARIANT = {
   secondary:
     'bg-white dark:bg-slate-900 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800',
   danger: 'bg-red-600 hover:bg-red-500 text-white',
+  toolbar:
+    'bg-slate-900 text-white border border-slate-700 hover:bg-slate-800',
+  toolbarDanger:
+    'bg-red-600 text-white border border-red-700 hover:bg-red-500',
 }
 
 const SIZE = {

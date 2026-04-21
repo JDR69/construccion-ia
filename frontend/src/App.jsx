@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
 import { AuthProvider, useAuth } from './hooks/useAuth.jsx'
 import { DashboardPage } from './pages/DashboardPage'
+import { EditorPage } from './pages/EditorPage'
 import { LoginPage } from './pages/LoginPage'
 
 function RequireAuth({ children }) {
@@ -35,6 +36,15 @@ export default function App() {
             element={
               <RequireAuth>
                 <DashboardPage />
+              </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/proyecto/:id/editor"
+            element={
+              <RequireAuth>
+                <EditorPage />
               </RequireAuth>
             }
           />

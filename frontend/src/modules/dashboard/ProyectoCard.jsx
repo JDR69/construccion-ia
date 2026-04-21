@@ -1,4 +1,4 @@
-import { Button } from '../ui/Button'
+import { Button } from '../../ui/Button'
 
 export function ProyectoCard({ proyecto, onPreview, onEdit, onDelete }) {
   return (

@@ -12,7 +12,7 @@ function toErrorMessage(err) {
 	)
 }
 
-export function VisualizacionProyecto({ proyecto, onClose }) {
+export function VisualizacionProyecto({ proyecto, onClose, onEnterPlano }) {
 	const proyectoId = proyecto?.id
 
 	const [isLoading, setIsLoading] = useState(false)
@@ -78,6 +78,28 @@ export function VisualizacionProyecto({ proyecto, onClose }) {
 	const planoPrincipal = planos?.[0] ?? null
 	const tienePresupuesto = Array.isArray(items) && items.length > 0
 
+	const planoArchivoUrl = useMemo(() => {
+		const raw = planoPrincipal?.archivo
+		if (!raw) return ''
+		if (String(raw).startsWith('http://') || String(raw).startsWith('https://')) {
+			return String(raw)
+		}
+		const base = String(http?.defaults?.baseURL ?? '').replace(/\/$/, '')
+		if (!base) return String(raw)
+		if (String(raw).startsWith('/')) return `${base}${raw}`
+		return `${base}/${raw}`
+	}, [planoPrincipal?.archivo])
+
+	const planoArchivoTipo = useMemo(() => {
+		const u = String(planoArchivoUrl || '').toLowerCase()
+		if (!u) return 'none'
+		if (u.endsWith('.pdf')) return 'pdf'
+		if (u.endsWith('.png') || u.endsWith('.jpg') || u.endsWith('.jpeg') || u.endsWith('.webp') || u.endsWith('.gif')) {
+			return 'image'
+		}
+		return 'other'
+	}, [planoArchivoUrl])
+
 	if (!proyectoId) return null
 
 	return (
@@ -93,6 +115,11 @@ export function VisualizacionProyecto({ proyecto, onClose }) {
 				</div>
 
 				<div className="flex gap-2">
+					{typeof onEnterPlano === 'function' ? (
+						<Button size="sm" onClick={() => onEnterPlano()}>
+							Entrar al Plano
+						</Button>
+					) : null}
 					<Button variant="secondary" size="sm" onClick={onClose}>
 						Cerrar
 					</Button>
@@ -134,11 +161,11 @@ export function VisualizacionProyecto({ proyecto, onClose }) {
 								Cargando información del plano…
 							</div>
 						) : planoPrincipal ? (
-							<div className="space-y-2">
-								{planoPrincipal.archivo ? (
+							<div className="space-y-3">
+								{planoArchivoUrl ? (
 									<a
 										className="text-sm text-purple-600 dark:text-[#38BDF8] hover:underline"
-										href={planoPrincipal.archivo}
+										href={planoArchivoUrl}
 										target="_blank"
 										rel="noreferrer"
 									>
@@ -150,13 +177,26 @@ export function VisualizacionProyecto({ proyecto, onClose }) {
 									</div>
 								)}
 
-								<div className="text-xs text-slate-500 dark:text-slate-400">
-									Datos vectoriales (resumen):
+								<div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-950/40 overflow-hidden">
+									{planoArchivoTipo === 'image' ? (
+										<img
+											src={planoArchivoUrl}
+											alt={planoPrincipal?.nombre ?? 'Plano'}
+											className="w-full h-[240px] object-contain bg-white/50 dark:bg-slate-950"
+											loading="lazy"
+										/>
+									) : planoArchivoTipo === 'pdf' ? (
+										<iframe
+											src={planoArchivoUrl}
+											title="Plano"
+											className="w-full h-[240px] bg-white dark:bg-slate-950"
+										/>
+									) : (
+										<div className="p-4 text-sm text-slate-600 dark:text-slate-300">
+											No se puede previsualizar este tipo de archivo.
+										</div>
+									)}
 								</div>
-
-								<pre className="text-xs whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200">
-									{JSON.stringify(planoPrincipal.datos_vectoriales ?? {}, null, 2)}
-								</pre>
 							</div>
 						) : (
 							<div className="text-sm text-slate-600 dark:text-slate-300">

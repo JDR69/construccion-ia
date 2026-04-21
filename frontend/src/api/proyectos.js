@@ -7,6 +7,11 @@ export async function getProyectos() {
   return res.data
 }
 
+export async function getProyecto(id) {
+  const res = await http.get(`${BASE}${id}/`)
+  return res.data
+}
+
 export async function createProyecto(data) {
   const res = await http.post(BASE, data)
   return res.data

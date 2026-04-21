@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth.jsx'
 import { useProyectos } from '../hooks/useProyectos'
 
 import { ListaProyectos } from '../modules/dashboard/ListaProyectos'
-import { VisualizacionProyecto } from '../modules/dashboard/VisualizacionProyecto'
+import { ProyectoPreview } from '../dashboard/ProyectoPreview'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Modal } from '../ui/Modal'
@@ -420,10 +420,7 @@ export function DashboardPage() {
             </div>
           )}
 
-          <VisualizacionProyecto
-            proyecto={previewing}
-            onClose={() => setPreviewing(null)}
-          />
+          <ProyectoPreview proyecto={previewing} onClose={() => setPreviewing(null)} />
 
           <ListaProyectos
             proyectos={proyectos}

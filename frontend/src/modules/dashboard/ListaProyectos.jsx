@@ -1,5 +1,5 @@
-import { Button } from '../ui/Button'
-import { Table } from '../ui/Table'
+import { Button } from '../../ui/Button'
+import { Table } from '../../ui/Table'
 
 import { ProyectoCard } from './ProyectoCard'
 
