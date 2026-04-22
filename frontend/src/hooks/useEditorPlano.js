@@ -105,17 +105,17 @@ export function useEditorPlano(proyectoId) {
     }
   }, [planoData?.id, datosVectoriales])
 
-  const procesarIA = useCallback(
+  const handleUploadIA = useCallback(
     async (file) => {
       if (!planoData?.id) return null
+      if (!file) return null
       setError('')
       setIsProcessingIA(true)
       try {
         const json = await procesarPlanoIA(planoData.id, file)
-        setDatosVectorialesLocal(json)
-        const updated = await updateDatosVectoriales(planoData.id, json)
-        setPlanoData(updated)
-        return updated
+        // El backend ya guarda en BD; aquí actualizamos el estado local.
+        setPlanoData((prev) => (prev ? { ...prev, datos_vectoriales: json } : prev))
+        return json
       } catch (e) {
         setError(String(toErrorMessage(e)))
         throw e
@@ -123,8 +123,10 @@ export function useEditorPlano(proyectoId) {
         setIsProcessingIA(false)
       }
     },
-    [planoData?.id, setDatosVectorialesLocal]
+    [planoData?.id]
   )
+
+  const procesarIA = useCallback(async (file) => handleUploadIA(file), [handleUploadIA])
 
   const addElemento = useCallback(
     (tipo) => {
@@ -208,6 +210,7 @@ export function useEditorPlano(proyectoId) {
       error,
       setDatosVectorialesLocal,
       saveDatosVectoriales,
+      handleUploadIA,
       procesarIA,
       addElemento,
       clearPlano,
@@ -221,6 +224,7 @@ export function useEditorPlano(proyectoId) {
       error,
       setDatosVectorialesLocal,
       saveDatosVectoriales,
+      handleUploadIA,
       procesarIA,
       addElemento,
       clearPlano,

@@ -1,9 +1,9 @@
-import { useRef } from 'react'
+import { forwardRef, useImperativeHandle, useRef } from 'react'
 
 import { CanvasBoard } from './CanvasBoard'
 import { EditorToolbar } from './EditorToolbar'
 
-export function EditorWorkspace({
+export const EditorWorkspace = forwardRef(function EditorWorkspace({
   datosVectoriales,
   onChange,
   onBack,
@@ -17,8 +17,17 @@ export function EditorWorkspace({
   saving,
   isDark,
   onToggleTheme,
-}) {
+}, ref) {
   const canvasRef = useRef(null)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      exportarJpg: () => canvasRef.current?.exportarJpg?.(),
+      exportarPdf: () => canvasRef.current?.exportarPdf?.(),
+    }),
+    []
+  )
 
   return (
     <div className="relative w-full h-full">
@@ -52,4 +61,4 @@ export function EditorWorkspace({
       </div>
     </div>
   )
-}
+})

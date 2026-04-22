@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState } from 'react'
 
-export function SubidaPlanoIA({ isProcessing, onUpload }) {
+export function SubidaPlanoIA({ isProcessing, onUpload, error }) {
   const inputRef = useRef(null)
   const [dragOver, setDragOver] = useState(false)
 
   const hint = useMemo(() => {
-    if (isProcessing) return 'Procesando IA…'
+    if (isProcessing) return 'La IA de Gemini está analizando tu plano…'
     return 'Arrastra tu plano aquí o haz clic para seleccionar'
   }, [isProcessing])
 
@@ -25,7 +25,7 @@ export function SubidaPlanoIA({ isProcessing, onUpload }) {
         <div className="mb-6">
           <div className="text-xl font-semibold text-white">Generar con IA</div>
           <div className="mt-1 text-sm text-slate-300">
-            Sube una imagen del plano. Esto simula un procesamiento y llena el JSON.
+            Sube una imagen del plano y Gemini generará un JSON vectorial.
           </div>
         </div>
 
@@ -66,12 +66,15 @@ export function SubidaPlanoIA({ isProcessing, onUpload }) {
             <div>
               <div className="text-base font-semibold text-white">{hint}</div>
               <div className="mt-2 text-sm text-slate-300">
-                Formatos: JPG, PNG (solo demo)
+                Formatos: JPG, PNG
               </div>
             </div>
 
             {isProcessing ? (
-              <div className="text-sm text-slate-200">Procesando…</div>
+              <div className="flex items-center gap-3 text-sm text-slate-200">
+                <div className="h-5 w-5 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
+                Procesando…
+              </div>
             ) : (
               <div className="text-sm text-slate-200">Subir</div>
             )}
@@ -86,8 +89,19 @@ export function SubidaPlanoIA({ isProcessing, onUpload }) {
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
 
+        {error ? (
+          <div
+            className="mt-4 rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300"
+            role="alert"
+          >
+            {error}
+          </div>
+        ) : null}
+
         {isProcessing ? (
-          <div className="mt-4 text-sm text-slate-300">Procesando IA…</div>
+          <div className="mt-4 text-sm text-slate-300">
+            La IA de Gemini está analizando tu plano... esto puede tomar unos segundos.
+          </div>
         ) : null}
       </div>
     </div>

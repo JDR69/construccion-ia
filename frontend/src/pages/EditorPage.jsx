@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { useEditorPlano } from '../hooks/useEditorPlano'
@@ -7,15 +7,18 @@ import { getProyecto } from '../api/proyectos'
 import { SeleccionMetodo } from '../modules/editor-planos/SeleccionMetodo'
 import { SubidaPlanoIA } from '../modules/editor-planos/SubidaPlanoIA'
 import { EditorWorkspace } from '../modules/editor-planos/EditorWorkspace'
+import { Modal } from '../ui/Modal'
+import { Button } from '../ui/Button'
 
 export function EditorPage() {
   const params = useParams()
   const proyectoId = params?.id
   const navigate = useNavigate()
 
-  const [isDark, setIsDark] = useState(() =>
-    document.documentElement.classList.contains('dark'),
-  )
+  const [isDark, setIsDark] = useState(() => {
+    document.documentElement.classList.add('dark')
+    return true
+  })
 
   useEffect(() => {
     const root = document.documentElement
@@ -39,6 +42,10 @@ export function EditorPage() {
 
   const [mode, setMode] = useState('auto') // auto | ia | manual
   const [saving, setSaving] = useState(false)
+
+  const workspaceRef = useRef(null)
+  const [postIAModalOpen, setPostIAModalOpen] = useState(false)
+  const [postIAStep, setPostIAStep] = useState('choice') // choice | save
 
   const [proyecto, setProyecto] = useState(null)
 
@@ -64,12 +71,14 @@ export function EditorPage() {
   const showEmpty = useMemo(() => {
     if (isLoading) return false
     if (hasVectorData) return false
-    // si el usuario eligió manual, entra aunque esté vacío
-    if (mode === 'manual') return false
-    return true
+    // Solo mostramos la pantalla de elección cuando todavía no eligió método.
+    return mode === 'auto'
   }, [hasVectorData, isLoading, mode])
 
-  const showIAUpload = useMemo(() => !hasVectorData && mode === 'ia', [hasVectorData, mode])
+  const showIAUpload = useMemo(
+    () => !hasVectorData && mode === 'ia',
+    [hasVectorData, mode]
+  )
 
   const enterManual = async () => {
     setMode('manual')
@@ -103,7 +112,7 @@ export function EditorPage() {
         <div className="w-full h-full flex items-center justify-center text-slate-200">
           Cargando editor…
         </div>
-      ) : error ? (
+      ) : error && !planoData ? (
         <div className="w-full h-full flex items-center justify-center p-6">
           <div className="max-w-xl w-full rounded-2xl border border-slate-800 bg-slate-950/60 p-6">
             <div className="text-lg font-semibold text-white">No se pudo abrir el editor</div>
@@ -114,17 +123,25 @@ export function EditorPage() {
           </div>
         </div>
       ) : showEmpty ? (
-        <SeleccionMetodo onIA={() => setMode('ia')} onManual={enterManual} />
+        <SeleccionMetodo onIA={() => setMode('ia')} onManual={enterManual} onBack={() => navigate(-1)} />
       ) : showIAUpload ? (
         <SubidaPlanoIA
           isProcessing={isProcessingIA}
+          error={error}
           onUpload={async (file) => {
-            await procesarIA(file)
-            setMode('auto')
+            try {
+              await procesarIA(file)
+              setMode('auto')
+              setPostIAStep('choice')
+              setPostIAModalOpen(true)
+            } catch {
+              // El hook ya setea `error`; aquí evitamos unhandled promise.
+            }
           }}
         />
       ) : (
         <EditorWorkspace
+          ref={workspaceRef}
           datosVectoriales={Array.isArray(datosVectoriales) ? datosVectoriales : []}
           onChange={setDatosVectorialesLocal}
           onBack={() => navigate(-1)}
@@ -140,6 +157,52 @@ export function EditorPage() {
           onToggleTheme={() => setIsDark((v) => !v)}
         />
       )}
+
+      <Modal
+        open={postIAModalOpen && hasVectorData}
+        title="Plano generado con IA"
+        onClose={() => setPostIAModalOpen(false)}
+        footer={
+          postIAStep === 'choice' ? (
+            <div className="flex w-full items-center justify-end gap-2">
+              <Button variant="secondary" onClick={() => setPostIAModalOpen(false)}>
+                Editar
+              </Button>
+              <Button onClick={() => setPostIAStep('save')}>Guardar</Button>
+            </div>
+          ) : (
+            <div className="flex w-full items-center justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={async () => {
+                  await workspaceRef.current?.exportarJpg?.()
+                  setPostIAModalOpen(false)
+                }}
+              >
+                JPG
+              </Button>
+              <Button
+                onClick={async () => {
+                  await workspaceRef.current?.exportarPdf?.()
+                  setPostIAModalOpen(false)
+                }}
+              >
+                PDF
+              </Button>
+            </div>
+          )
+        }
+      >
+        {postIAStep === 'choice' ? (
+          <div className="text-sm text-slate-200">
+            ¿Qué deseas hacer con el plano generado?
+          </div>
+        ) : (
+          <div className="text-sm text-slate-200">
+            ¿En qué formato deseas guardarlo?
+          </div>
+        )}
+      </Modal>
 
       {!isLoading && planoData ? (
         <div className="absolute bottom-3 left-3 text-xs text-slate-400">

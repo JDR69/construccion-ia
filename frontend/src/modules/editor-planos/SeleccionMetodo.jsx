@@ -1,10 +1,18 @@
 import { Button } from '../../ui/Button'
 
-export function SeleccionMetodo({ onIA, onManual }) {
+export function SeleccionMetodo({ onIA, onManual, onBack }) {
   return (
     <div className="w-full h-full flex items-center justify-center p-6">
       <div className="w-full max-w-4xl">
         <div className="mb-6">
+          {typeof onBack === 'function' ? (
+            <div className="mb-4">
+              <Button variant="secondary" size="sm" onClick={onBack}>
+                Atrás
+              </Button>
+            </div>
+          ) : null}
+
           <div className="text-xl font-semibold text-white">Editor de Planos</div>
           <div className="mt-1 text-sm text-slate-300">
             Elige cómo quieres generar los datos vectoriales del plano.

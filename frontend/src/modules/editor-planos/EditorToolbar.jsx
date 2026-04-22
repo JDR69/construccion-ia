@@ -190,6 +190,7 @@ export function EditorToolbar({
   onToggleTheme,
 }) {
   const iconBtn = 'h-16 w-16 px-0 justify-center rounded-2xl'
+  const iconSize = 'w-6 h-6 shrink-0'
   const groupWrap =
     'flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-950/95 px-3 py-3 backdrop-blur max-w-[96vw]'
   const rowScroll = 'flex flex-wrap items-center justify-center gap-2'
@@ -207,7 +208,7 @@ export function EditorToolbar({
             title="Volver"
             aria-label="Volver"
           >
-            <IconBack className="w-10 h-10" />
+            <IconBack className={iconSize} />
           </Button>
 
           <Button
@@ -219,7 +220,7 @@ export function EditorToolbar({
             title={isDark ? 'Modo claro' : 'Modo oscuro'}
             aria-label={isDark ? 'Activar modo claro' : 'Activar modo oscuro'}
           >
-            {isDark ? <IconSun className="w-10 h-10" /> : <IconMoon className="w-10 h-10" />}
+            {isDark ? <IconSun className={iconSize} /> : <IconMoon className={iconSize} />}
           </Button>
 
           <Button
@@ -231,7 +232,7 @@ export function EditorToolbar({
             title="Guardar"
             aria-label="Guardar"
           >
-            <IconSave className="w-10 h-10" />
+            <IconSave className={iconSize} />
           </Button>
 
           <Button
@@ -243,7 +244,7 @@ export function EditorToolbar({
             title="Exportar JPG"
             aria-label="Exportar JPG"
           >
-            <IconJpg className="w-10 h-10" />
+            <IconJpg className={iconSize} />
           </Button>
 
           <Button
@@ -255,7 +256,7 @@ export function EditorToolbar({
             title="Exportar PDF"
             aria-label="Exportar PDF"
           >
-            <IconPdf className="w-10 h-10" />
+            <IconPdf className={iconSize} />
           </Button>
 
           <div className="mx-1 h-9 w-px bg-slate-800" />
@@ -269,7 +270,7 @@ export function EditorToolbar({
             title="Agregar Muro"
             aria-label="Agregar Muro"
           >
-            <IconWall className="w-10 h-10" />
+            <IconWall className={iconSize} />
           </Button>
           <Button
             variant="toolbar"
@@ -280,7 +281,7 @@ export function EditorToolbar({
             title="Agregar Puerta"
             aria-label="Agregar Puerta"
           >
-            <IconDoor className="w-10 h-10" />
+            <IconDoor className={iconSize} />
           </Button>
           <Button
             variant="toolbar"
@@ -291,7 +292,7 @@ export function EditorToolbar({
             title="Agregar Ventana"
             aria-label="Agregar Ventana"
           >
-            <IconWindow className="w-10 h-10" />
+            <IconWindow className={iconSize} />
           </Button>
 
           <div className="mx-1 h-9 w-px bg-slate-800" />
@@ -305,7 +306,7 @@ export function EditorToolbar({
             title="Limpiar plano"
             aria-label="Limpiar plano"
           >
-            <IconTrash className="w-10 h-10" />
+            <IconTrash className={iconSize} />
           </Button>
         </div>
       </div>

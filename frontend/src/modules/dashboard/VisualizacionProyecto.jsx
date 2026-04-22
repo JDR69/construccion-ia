@@ -12,7 +12,7 @@ function toErrorMessage(err) {
 	)
 }
 
-export function VisualizacionProyecto({ proyecto, onClose, onEnterPlano }) {
+export function VisualizacionProyecto({ proyecto, onClose, onEnterPlano, embedded = false }) {
 	const proyectoId = proyecto?.id
 
 	const [isLoading, setIsLoading] = useState(false)
@@ -64,8 +64,7 @@ export function VisualizacionProyecto({ proyecto, onClose, onEnterPlano }) {
 				if (!mounted) return
 				setError(String(toErrorMessage(e)))
 			} finally {
-				if (!mounted) return
-				setIsLoading(false)
+				if (mounted) setIsLoading(false)
 			}
 		}
 
@@ -103,28 +102,30 @@ export function VisualizacionProyecto({ proyecto, onClose, onEnterPlano }) {
 	if (!proyectoId) return null
 
 	return (
-		<section className="mb-6">
-			<div className="flex items-center justify-between gap-3">
-				<div>
-					<h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-						Visualización previa
-					</h2>
-					<p className="text-sm text-slate-600 dark:text-slate-300">
-						{proyecto?.titulo ?? 'Proyecto'}
-					</p>
-				</div>
+		<section className={embedded ? '' : 'mb-6'}>
+			{embedded ? null : (
+				<div className="flex items-center justify-between gap-3">
+					<div>
+						<h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+							Visualización previa
+						</h2>
+						<p className="text-sm text-slate-600 dark:text-slate-300">
+							{proyecto?.titulo ?? 'Proyecto'}
+						</p>
+					</div>
 
-				<div className="flex gap-2">
-					{typeof onEnterPlano === 'function' ? (
-						<Button size="sm" onClick={() => onEnterPlano()}>
-							Entrar al Plano
+					<div className="flex gap-2">
+						{typeof onEnterPlano === 'function' ? (
+							<Button size="sm" onClick={() => onEnterPlano()}>
+								Entrar al Plano
+							</Button>
+						) : null}
+						<Button variant="secondary" size="sm" onClick={onClose}>
+							Cerrar
 						</Button>
-					) : null}
-					<Button variant="secondary" size="sm" onClick={onClose}>
-						Cerrar
-					</Button>
+					</div>
 				</div>
-			</div>
+			)}
 
 			{error && (
 				<div

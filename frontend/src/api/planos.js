@@ -12,7 +12,7 @@ export async function getPlano(proyectoId) {
   const created = await http.post(BASE, {
     proyecto: proyectoId,
     nombre: 'Plano principal',
-    datos_vectoriales: {},
+    datos_vectoriales: [],
   })
   return created.data
 }
@@ -24,13 +24,14 @@ export async function updateDatosVectoriales(planoId, json) {
   return res.data
 }
 
-// Simulación IA: retorna JSON de prueba (no llama al backend).
-export async function procesarPlanoIA(_planoId, _file) {
-  await new Promise((r) => setTimeout(r, 1200))
+// IA real: envía una imagen al backend para que Gemini genere datos vectoriales.
+export async function procesarPlanoIA(planoId, file) {
+  const form = new FormData()
+  form.append('file', file)
 
-  return [
-    { id: 1, tipo: 'muro', x: 80, y: 100, width: 320, height: 18 },
-    { id: 2, tipo: 'muro', x: 80, y: 160, width: 260, height: 18 },
-    { id: 3, tipo: 'muro', x: 80, y: 220, width: 420, height: 18 },
-  ]
+  const res = await http.post(`${BASE}${planoId}/procesar-ia/`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+
+  return res.data
 }
