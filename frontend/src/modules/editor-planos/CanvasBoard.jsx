@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva'
+import { Group, Layer, Line, Path, Rect, Stage, Text, Transformer } from 'react-konva'
 
 const PX_POR_METRO = 100
 const ESPESOR_M = {
@@ -15,6 +15,58 @@ function espesorPxPorTipo(tipo) {
 
 function tieneEspesorFijo(tipo) {
   return tipo === 'muro' || tipo === 'puerta' || tipo === 'ventana'
+}
+
+function isTipoRect(tipo) {
+  return tipo === 'muro' || tipo === 'puerta' || tipo === 'ventana'
+}
+
+function symbolPathByName(nombre) {
+  const key = String(nombre || '').trim().toLowerCase()
+
+  // Paths simples de ejemplo (SVG path) en coordenadas ~100x60
+  // cama: rectángulo base + almohadas
+  if (key === 'cama') {
+    return 'M5 10 H95 V55 H5 Z M10 15 H45 V30 H10 Z M55 15 H90 V30 H55 Z'
+  }
+
+  // inodoro: base oval + tanque
+  if (key === 'inodoro' || key === 'wc') {
+    return 'M35 8 H65 V22 H35 Z M30 24 C30 18 70 18 70 24 V44 C70 54 30 54 30 44 Z'
+  }
+
+  return null
+}
+
+function cotaTicks({ x1, y1, x2, y2, tick = 10 }) {
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const len = Math.hypot(dx, dy)
+  if (!len) {
+    return {
+      a: [x1, y1, x1, y1],
+      b: [x2, y2, x2, y2],
+    }
+  }
+
+  // vector perpendicular normalizado
+  const px = -dy / len
+  const py = dx / len
+
+  const ax1 = x1 - px * tick
+  const ay1 = y1 - py * tick
+  const ax2 = x1 + px * tick
+  const ay2 = y1 + py * tick
+
+  const bx1 = x2 - px * tick
+  const by1 = y2 - py * tick
+  const bx2 = x2 + px * tick
+  const by2 = y2 + py * tick
+
+  return {
+    a: [ax1, ay1, ax2, ay2],
+    b: [bx1, by1, bx2, by2],
+  }
 }
 
 const ROTACION_SNAP_GRADOS = 45

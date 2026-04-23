@@ -18,12 +18,17 @@ class GeminiServiceError(Exception):
 
 
 SYSTEM_PROMPT = (
-    "Actúa como un arquitecto experto. Analiza esta imagen de un plano y extrae la geometría. "
-    "Devuelve ÚNICAMENTE un array JSON válido sin formato markdown. "
-    "Formato esperado: "
-    "[{\"id\": \"m1\", \"tipo\": \"muro\", \"x\": 0, \"y\": 0, \"longitud\": 300, \"grosor\": 15, \"orientacion\": \"horizontal\"}, "
-    "{\"id\": \"p1\", \"tipo\": \"puerta\", \"x\": 100, \"y\": 0, \"ancho\": 90, \"rotacion\": 0}]. "
-    "Escala aprox a pixeles."
+    "Eres un arquitecto/delineante experto. Analiza la imagen de un plano (2D) y extrae SOLO geometría básica. "
+    "Devuelve ÚNICAMENTE un array JSON válido (sin markdown, sin texto adicional). "
+    "Sistema de coordenadas: origen (0,0) en la esquina superior izquierda de la imagen; x hacia la derecha; y hacia abajo. "
+    "Unidades: píxeles aproximados de la imagen enviada. "
+    "Elementos permitidos: muros, puertas, ventanas. "
+    "Representación: usa rectángulos alineados a ejes (width/height) y, si aplica, rotation en grados. "
+    "Reglas: (1) NO inventes elementos fuera del dibujo; (2) evita duplicados; (3) prioriza muros perimetrales y divisiones principales; "
+    "(4) si hay duda entre puerta/ventana, clasifica como 'puerta' solo si se aprecia abertura/arco; caso contrario 'ventana'. "
+    "Formato esperado (ejemplo): "
+    "[{\"id\":\"m1\",\"tipo\":\"muro\",\"x\":10,\"y\":20,\"width\":300,\"height\":15},"
+    "{\"id\":\"p1\",\"tipo\":\"puerta\",\"x\":120,\"y\":35,\"width\":90,\"height\":15,\"rotacion\":0}]."
 )
 
 
@@ -149,18 +154,37 @@ def _unwrap_to_list(obj: Any) -> Any:
     return obj
 
 
-def _select_gemini_model_name(genai) -> str:
-    forced = str(getattr(settings, "GEMINI_MODEL", "") or "").strip()
+def _select_gemini_model_name(genai, *, prefer_strong: bool) -> str:
+    if prefer_strong:
+        forced = str(getattr(settings, "GEMINI_MODEL_STRONG", "") or "").strip()
+    else:
+        forced = str(getattr(settings, "GEMINI_MODEL_FAST", "") or "").strip()
+
+    # Backward compatible: si existe GEMINI_MODEL, lo respetamos en ambos caminos.
+    forced_legacy = str(getattr(settings, "GEMINI_MODEL", "") or "").strip()
+    if forced_legacy:
+        return forced_legacy
     if forced:
         return forced
 
-    preferred = [
-        "models/gemini-2.5-flash",
-        "models/gemini-2.0-flash",
-        "models/gemini-flash-latest",
-        "models/gemini-2.0-flash-lite",
-        "models/gemini-pro-latest",
-    ]
+    preferred = (
+        [
+            # Más calidad (más caro/lento)
+            "models/gemini-2.5-pro",
+            "models/gemini-2.0-pro",
+            "models/gemini-pro-latest",
+            "models/gemini-2.5-flash",
+        ]
+        if prefer_strong
+        else [
+            # Más rápido (suele fallar en planos con líneas finas)
+            "models/gemini-2.5-flash",
+            "models/gemini-2.0-flash",
+            "models/gemini-flash-latest",
+            "models/gemini-2.0-flash-lite",
+            "models/gemini-pro-latest",
+        ]
+    )
 
     try:
         available: List[str] = []
@@ -184,7 +208,30 @@ def _select_gemini_model_name(genai) -> str:
         pass
 
     # Fallback conservador si list_models falla.
-    return "models/gemini-2.0-flash"
+    return "models/gemini-2.0-flash" if not prefer_strong else "models/gemini-pro-latest"
+
+
+def _generate_with_model(*, model, image_pil) -> str:
+    resp = model.generate_content(
+        [
+            "Devuelve SOLO un array JSON válido (sin markdown). "
+            "No uses comas finales. Cierra el array con ']'. "
+            "Usa números para x/y/width/height. "
+            "Si no detectas nada, devuelve [] (array vacío).",
+            image_pil,
+        ],
+        generation_config={
+            "temperature": 0.0,
+            "top_p": 0.1,
+            "max_output_tokens": 8192,
+            "response_mime_type": "application/json",
+        },
+    )
+
+    text = getattr(resp, "text", None)
+    if not text:
+        raise GeminiServiceError("Gemini no devolvió texto. Intenta con otra imagen.")
+    return str(text)
 
 
 def _extract_json_array(text: str) -> Any:
@@ -373,38 +420,45 @@ def procesar_plano_con_gemini(*, image_pil) -> GeminiParseResult:
 
     genai.configure(api_key=api_key)
 
-    model_name = _select_gemini_model_name(genai)
+    # Por defecto usamos modelo rápido (Flash). Si se desea un modelo más fuerte,
+    # configurar GEMINI_MODEL o GEMINI_MODEL_STRONG.
+    model_name = _select_gemini_model_name(genai, prefer_strong=False)
     raw = ""
 
     try:
         model = genai.GenerativeModel(model_name, system_instruction=SYSTEM_PROMPT)
 
-        # Prompt del usuario (minimalista): el system prompt ya es estricto.
-        resp = model.generate_content(
-            [
-                "Devuelve SOLO un array JSON válido (sin markdown). No uses comas finales. Cierra el array con ']'.",
-                image_pil,
-            ],
-            generation_config={
-                "temperature": 0.0,
-                "top_p": 0.1,
-                "max_output_tokens": 4096,
-                "response_mime_type": "application/json",
-            },
-        )
-
-        text = getattr(resp, "text", None)
-        if not text:
-            raise GeminiServiceError(
-                "Gemini no devolvió texto. Intenta con otra imagen."
-            )
-
-        raw = str(text)
+        raw = _generate_with_model(model=model, image_pil=image_pil)
         parsed = _extract_json_array(raw)
         vector_data = _validate_vector_data(parsed)
         return GeminiParseResult(vector_data=vector_data, raw_text=raw)
 
     except GeminiServiceError as e:
+        # Fallback: si el modelo rápido no detecta geometría o devuelve algo no parseable,
+        # reintentamos 1 vez con un modelo más fuerte SOLO si está configurado explícitamente.
+        msg = str(e)
+        should_retry = (
+            "no detectó geometría" in msg.lower()
+            or "no devolvió un json" in msg.lower()
+            or "json reconocible" in msg.lower()
+            or "json inválido" in msg.lower()
+        )
+
+        strong_forced = str(getattr(settings, "GEMINI_MODEL_STRONG", "") or "").strip()
+        if should_retry and strong_forced:
+            try:
+                strong_name = _select_gemini_model_name(genai, prefer_strong=True)
+                if strong_name != model_name:
+                    strong_model = genai.GenerativeModel(
+                        strong_name, system_instruction=SYSTEM_PROMPT
+                    )
+                    raw2 = _generate_with_model(model=strong_model, image_pil=image_pil)
+                    parsed2 = _extract_json_array(raw2)
+                    vector_data2 = _validate_vector_data(parsed2)
+                    return GeminiParseResult(vector_data=vector_data2, raw_text=raw2)
+            except GeminiServiceError:
+                pass
+
         if getattr(settings, "DEBUG", False):
             cleaned = (raw or "").strip().replace("\r", " ").replace("\n", " ")
             start_preview = cleaned[:500]

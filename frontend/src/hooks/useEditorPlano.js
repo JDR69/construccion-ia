@@ -14,11 +14,41 @@ function isEmptyVectorData(data) {
 }
 
 function toErrorMessage(err) {
-  return (
-    err?.response?.data?.detail ||
-    err?.message ||
-    'Ocurrió un error inesperado'
-  )
+  const status = err?.response?.status
+  const data = err?.response?.data
+
+  if (data) {
+    // DRF típico: { detail: "..." }
+    if (typeof data === 'object' && !Array.isArray(data)) {
+      const detail = data?.detail
+      if (detail) return status ? `HTTP ${status}: ${detail}` : String(detail)
+      try {
+        return status ? `HTTP ${status}: ${JSON.stringify(data)}` : JSON.stringify(data)
+      } catch {
+        // ignore
+      }
+    }
+
+    // A veces el backend devuelve HTML/texto (debug page o error proxy)
+    if (typeof data === 'string') {
+      const s = data.trim()
+      // Intento parsear JSON si vino como string
+      if (s.startsWith('{') || s.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(s)
+          const detail = parsed?.detail
+          if (detail) return status ? `HTTP ${status}: ${detail}` : String(detail)
+          return status ? `HTTP ${status}: ${s.slice(0, 240)}` : s.slice(0, 240)
+        } catch {
+          // ignore
+        }
+      }
+      const preview = s.replace(/\s+/g, ' ').slice(0, 240)
+      return status ? `HTTP ${status}: ${preview}` : preview
+    }
+  }
+
+  return err?.message || 'Ocurrió un error inesperado'
 }
 
 function rectsOverlap(a, b) {

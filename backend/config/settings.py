@@ -17,6 +17,15 @@ DEBUG = os.getenv("DJANGO_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
 # Acepta GEMINI_API_KEY (preferido) y como fallback GOOGLE_API_KEY.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip()
+GEMINI_MODEL_FAST = os.getenv("GEMINI_MODEL_FAST", "").strip()
+GEMINI_MODEL_STRONG = os.getenv("GEMINI_MODEL_STRONG", "").strip()
+
+# OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+
+# Selector de proveedor IA para procesar planos: gemini | openai
+IA_PROVIDER = os.getenv("IA_PROVIDER", "gemini").strip().lower()
 
 _allowed_hosts = os.getenv("DJANGO_ALLOWED_HOSTS", "")
 ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts.split(",") if h.strip()]
