@@ -37,6 +37,9 @@ export function EditorPage() {
     saveDatosVectoriales,
     procesarIA,
     addElemento,
+    addTexto,
+    addCota,
+    addSimbolo,
     clearPlano,
   } = useEditorPlano(proyectoId)
 
@@ -147,7 +150,10 @@ export function EditorPage() {
           onBack={() => navigate(-1)}
           onClear={onClear}
           onSave={onSave}
-          onAdd={addElemento}
+          onAddElemento={addElemento}
+          onAddTexto={addTexto}
+          onAddCota={addCota}
+          onAddSimbolo={addSimbolo}
           exportTitulo={proyecto?.titulo || planoData?.nombre || `Plano #${planoData?.id}` || 'Casa'}
           exportSubtitulo={planoData ? `Plano #${planoData.id} — Proyecto ${planoData.proyecto}` : ''}
           exportUbicacion={planoData?.nombre || ''}

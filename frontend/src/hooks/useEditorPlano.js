@@ -210,6 +210,67 @@ export function useEditorPlano(proyectoId) {
     [datosVectoriales, setDatosVectorialesLocal]
   )
 
+  // ─── TEXTO libre ─────────────────────────────────────────────────────
+  const addTexto = useCallback(
+    (x, y, texto, tamano_fuente = 16) => {
+      const current = Array.isArray(datosVectoriales) ? datosVectoriales : []
+      const nuevo = {
+        id: Date.now(),
+        tipo: 'texto',
+        x: Number(x) || 0,
+        y: Number(y) || 0,
+        texto: String(texto || ''),
+        tamano_fuente: Number(tamano_fuente) || 16,
+      }
+      const next = [...current, nuevo]
+      setDatosVectorialesLocal(next)
+      return next
+    },
+    [datosVectoriales, setDatosVectorialesLocal],
+  )
+
+  // ─── COTA arquitectónica ─────────────────────────────────────────────
+  const addCota = useCallback(
+    (x1, y1, x2, y2, valor, orientacion = 'horizontal') => {
+      const current = Array.isArray(datosVectoriales) ? datosVectoriales : []
+      const nuevo = {
+        id: Date.now(),
+        tipo: 'cota',
+        x1: Number(x1) || 0,
+        y1: Number(y1) || 0,
+        x2: Number(x2) || 0,
+        y2: Number(y2) || 0,
+        valor: String(valor || ''),
+        orientacion, // 'horizontal' | 'vertical'
+      }
+      const next = [...current, nuevo]
+      setDatosVectorialesLocal(next)
+      return next
+    },
+    [datosVectoriales, setDatosVectorialesLocal],
+  )
+
+  // ─── SÍMBOLO (mueble u otro) ───────────────────────────────────────────
+  const addSimbolo = useCallback(
+    (x, y, nombre, categoria = 'mueble', rotacion = 0, escala = 1) => {
+      const current = Array.isArray(datosVectoriales) ? datosVectoriales : []
+      const nuevo = {
+        id: Date.now(),
+        tipo: 'simbolo',
+        categoria: String(categoria || 'mueble'),
+        nombre: String(nombre || ''),
+        x: Number(x) || 0,
+        y: Number(y) || 0,
+        rotacion: Number(rotacion) || 0,
+        escala: Number(escala) || 1,
+      }
+      const next = [...current, nuevo]
+      setDatosVectorialesLocal(next)
+      return next
+    },
+    [datosVectoriales, setDatosVectorialesLocal],
+  )
+
   const clearPlano = useCallback(async () => {
     if (!planoData?.id) return null
     setError('')
@@ -243,6 +304,9 @@ export function useEditorPlano(proyectoId) {
       handleUploadIA,
       procesarIA,
       addElemento,
+      addTexto,
+      addCota,
+      addSimbolo,
       clearPlano,
     }),
     [
@@ -257,6 +321,9 @@ export function useEditorPlano(proyectoId) {
       handleUploadIA,
       procesarIA,
       addElemento,
+      addTexto,
+      addCota,
+      addSimbolo,
       clearPlano,
     ]
   )

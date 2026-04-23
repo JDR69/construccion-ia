@@ -26,57 +26,6 @@ function IconSun(props) {
   )
 }
 
-function IconWall(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M3.75 7.5h16.5M3.75 12h16.5M3.75 16.5h16.5"
-      />
-    </svg>
-  )
-}
-
-function IconDoor(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M7.5 3.75h9A1.5 1.5 0 0118 5.25v15H7.5v-16.5z"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={3}
-        d="M15.25 12h.01"
-      />
-    </svg>
-  )
-}
-
-function IconWindow(props) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M4.5 6.75h15v10.5h-15V6.75z"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M12 6.75v10.5M4.5 12h15"
-      />
-    </svg>
-  )
-}
-
 function IconBack(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
@@ -178,11 +127,12 @@ function IconPdf(props) {
   )
 }
 
+// ─── Toolbar inferior — solo controles de sesión/export ──────────────────────
+// Los botones de insertar elementos viven en <ElementsPalette> (lado derecho).
 export function EditorToolbar({
   onBack,
   onClear,
   onSave,
-  onAdd,
   onExportJpg,
   onExportPdf,
   saving,
@@ -199,6 +149,7 @@ export function EditorToolbar({
     <div className="w-full flex justify-center pb-4">
       <div className={groupWrap}>
         <div className={rowScroll}>
+          {/* ── Volver ── */}
           <Button
             variant="toolbar"
             size="lg"
@@ -211,6 +162,7 @@ export function EditorToolbar({
             <IconBack className={iconSize} />
           </Button>
 
+          {/* ── Tema ── */}
           <Button
             variant="toolbar"
             size="lg"
@@ -223,6 +175,7 @@ export function EditorToolbar({
             {isDark ? <IconSun className={iconSize} /> : <IconMoon className={iconSize} />}
           </Button>
 
+          {/* ── Guardar ── */}
           <Button
             variant="toolbar"
             size="lg"
@@ -235,6 +188,7 @@ export function EditorToolbar({
             <IconSave className={iconSize} />
           </Button>
 
+          {/* ── Exportar JPG ── */}
           <Button
             variant="toolbar"
             size="lg"
@@ -247,6 +201,7 @@ export function EditorToolbar({
             <IconJpg className={iconSize} />
           </Button>
 
+          {/* ── Exportar PDF ── */}
           <Button
             variant="toolbar"
             size="lg"
@@ -261,42 +216,7 @@ export function EditorToolbar({
 
           <div className="mx-1 h-9 w-px bg-slate-800" />
 
-          <Button
-            variant="toolbar"
-            size="lg"
-            className={iconBtn}
-            onClick={() => onAdd?.('muro')}
-            disabled={saving}
-            title="Agregar Muro"
-            aria-label="Agregar Muro"
-          >
-            <IconWall className={iconSize} />
-          </Button>
-          <Button
-            variant="toolbar"
-            size="lg"
-            className={iconBtn}
-            onClick={() => onAdd?.('puerta')}
-            disabled={saving}
-            title="Agregar Puerta"
-            aria-label="Agregar Puerta"
-          >
-            <IconDoor className={iconSize} />
-          </Button>
-          <Button
-            variant="toolbar"
-            size="lg"
-            className={iconBtn}
-            onClick={() => onAdd?.('ventana')}
-            disabled={saving}
-            title="Agregar Ventana"
-            aria-label="Agregar Ventana"
-          >
-            <IconWindow className={iconSize} />
-          </Button>
-
-          <div className="mx-1 h-9 w-px bg-slate-800" />
-
+          {/* ── Limpiar ── */}
           <Button
             variant="toolbarDanger"
             size="lg"
