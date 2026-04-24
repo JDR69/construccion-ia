@@ -431,8 +431,17 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
   const stageRef = useRef(null)
   const transformerRef = useRef(null)
   const shapeRefs = useRef({})
+  const clipboardRef = useRef([])
+  const [activeTool, setActiveTool] = useState('select') // 'select' | 'pan'
   const [size, setSize] = useState({ width: 300, height: 300 })
-  const [selectedId, setSelectedId] = useState(null)
+  const [selectedIds, setSelectedIds] = useState([])
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
+  
+  const [stageScale, setStageScale] = useState(1)
+  const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
+  const [isSpaceDown, setIsSpaceDown] = useState(false)
+  const [selectionRect, setSelectionRect] = useState(null)
+  const selectionStartRef = useRef(null)
 
   // ── Editor de texto inline ────────────────────────────────────────────
   const [editingId, setEditingId] = useState(null)
@@ -446,6 +455,8 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    const preventContext = (e) => e.preventDefault()
+    el.addEventListener('contextmenu', preventContext)
 
     const ro = new ResizeObserver((entries) => {
       const cr = entries[0]?.contentRect
@@ -454,10 +465,49 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     })
 
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => {
+      el.removeEventListener('contextmenu', preventContext)
+      ro.disconnect()
+    }
   }, [])
 
   const shapes = useMemo(() => normalizarFormas(datosVectoriales), [datosVectoriales])
+
+  // ── Historial (Undo / Redo) ──────────────────────────────────────────
+  const [history, setHistory] = useState([])
+  const [historyStep, setHistoryStep] = useState(-1)
+
+  useEffect(() => {
+    const isNew = historyStep === -1 || JSON.stringify(datosVectoriales) !== JSON.stringify(history[historyStep])
+    if (isNew) {
+      setHistory([datosVectoriales])
+      setHistoryStep(0)
+    }
+  }, [datosVectoriales, history, historyStep])
+
+  const dispatchChange = useCallback((next) => {
+    const newHistory = history.slice(0, historyStep + 1)
+    newHistory.push(next)
+    setHistory(newHistory)
+    setHistoryStep(newHistory.length - 1)
+    onChange?.(next)
+  }, [history, historyStep, onChange])
+
+  const undo = useCallback(() => {
+    if (historyStep > 0) {
+      const nextStep = historyStep - 1
+      setHistoryStep(nextStep)
+      onChange?.(history[nextStep])
+    }
+  }, [history, historyStep, onChange])
+
+  const redo = useCallback(() => {
+    if (historyStep < history.length - 1) {
+      const nextStep = historyStep + 1
+      setHistoryStep(nextStep)
+      onChange?.(history[nextStep])
+    }
+  }, [history, historyStep, onChange])
 
   const selectedShape = useMemo(
     () => (selectedId ? shapes.find((s) => s.id === selectedId) : null),
@@ -497,13 +547,13 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
               null
         if (patch) {
           const next = shapes.map((ss) => ss.id === editingId ? { ...ss, ...patch } : ss)
-          onChange?.(next)
+          dispatchChange(next)
         }
       }
     }
     setEditingId(null)
     setEditingText('')
-  }, [editingId, editingText, shapes, onChange])
+  }, [editingId, editingText, shapes, dispatchChange])
 
   const aplicarRotacionSeleccion = (grados) => {
     if (!selectedId) return
@@ -522,7 +572,9 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     if (!stage) return
 
     setModoExport(true)
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    zoomToFit()
+    // Esperamos a que React aplique el nuevo zoomToFit y modoExport antes de capturar el canvas
+    await new Promise((r) => setTimeout(r, 150))
 
     const tr = transformerRef.current
     const prevVisible = tr?.visible?.() ?? true
@@ -566,7 +618,9 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     if (!stage) return
 
     setModoExport(true)
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    zoomToFit()
+    // Esperamos a que React aplique el nuevo zoomToFit y modoExport antes de capturar el canvas
+    await new Promise((r) => setTimeout(r, 150))
 
     const tr = transformerRef.current
     const prevVisible = tr?.visible?.() ?? true
@@ -613,7 +667,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     pdf.save(`${name}.pdf`)
   }
 
-  useImperativeHandle(ref, () => ({ exportarJpg, exportarPdf }), [shapes, exportTitulo, exportSubtitulo])
+  useImperativeHandle(ref, () => ({ exportarJpg, exportarPdf, zoomToFit }), [shapes, exportTitulo, exportSubtitulo])
 
   const grid = useMemo(() => {
     const spacing = 40
@@ -629,25 +683,173 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     return lines
   }, [size.height, size.width])
 
-  // ── Tecla Delete/Backspace elimina el elemento seleccionado ──────────
+  // ── Teclado: Navegación, Eliminar y Deshacer/Rehacer ──────────
   useEffect(() => {
-    const handler = (e) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return
-      if (!selectedId) return
-      const next = shapes.filter(s => s.id !== selectedId)
-      onChange?.(next)
-      setSelectedId(null)
+    const onKeyDown = (e) => {
+      const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT'
+      if (isInput) return
+
+      if (e.code === 'Space') {
+        setIsSpaceDown(true)
+        e.preventDefault()
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedIds.length > 0) {
+          const next = shapes.filter(s => !selectedIds.includes(s.id))
+          dispatchChange(next)
+          setSelectedIds([])
+        }
+      }
+
+      // Atajos de Herramienta
+      if (e.key.toLowerCase() === 'v' && !e.ctrlKey && !e.metaKey) setActiveTool('select')
+      if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.metaKey) setActiveTool('pan')
+
+      // Ctrl + C (Copiar)
+      if (e.key.toLowerCase() === 'c' && (e.ctrlKey || e.metaKey)) {
+        if (selectedIds.length > 0) {
+          const selectedShapes = shapes.filter(s => selectedIds.includes(s.id))
+          clipboardRef.current = selectedShapes.map(s => ({ ...s }))
+        }
+      }
+
+      // Ctrl + V (Pegar)
+      if (e.key.toLowerCase() === 'v' && (e.ctrlKey || e.metaKey)) {
+        if (clipboardRef.current && clipboardRef.current.length > 0) {
+          const newShapes = clipboardRef.current.map(s => {
+            const newId = `${s.tipo}-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+            const obj = {
+              ...s,
+              id: newId,
+              x: (Number(s.x) || 0) + 20,
+              y: (Number(s.y) || 0) + 20,
+            }
+            if (s.x1 !== undefined) obj.x1 = (Number(s.x1) || 0) + 20
+            if (s.y1 !== undefined) obj.y1 = (Number(s.y1) || 0) + 20
+            if (s.x2 !== undefined) obj.x2 = (Number(s.x2) || 0) + 20
+            if (s.y2 !== undefined) obj.y2 = (Number(s.y2) || 0) + 20
+            return obj
+          })
+          
+          dispatchChange([...shapes, ...newShapes])
+          setSelectedIds(newShapes.map(s => s.id))
+          clipboardRef.current = newShapes.map(s => ({ ...s })) // Preparar para el siguiente pegado
+        }
+      }
+
+      // Ctrl + Z / Ctrl + Shift + Z
+      if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey)) {
+        if (e.shiftKey) redo()
+        else undo()
+        e.preventDefault()
+      }
+      // Ctrl + Y
+      if (e.key.toLowerCase() === 'y' && (e.ctrlKey || e.metaKey)) {
+        redo()
+        e.preventDefault()
+      }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [selectedId, shapes, onChange])
+    const onKeyUp = (e) => {
+      if (e.code === 'Space') {
+        setIsSpaceDown(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [selectedIds, shapes, dispatchChange, undo, redo])
 
   const eliminarSeleccionado = () => {
-    if (!selectedId) return
-    const next = shapes.filter(s => s.id !== selectedId)
-    onChange?.(next)
-    setSelectedId(null)
+    if (selectedIds.length === 0) return
+    const next = shapes.filter(s => !selectedIds.includes(s.id))
+    dispatchChange(next)
+    setSelectedIds([])
+  }
+
+  // ── Handlers MultiDrag ────────────────────────────────────────────────────────
+  const handleMultiDragMove = (e, draggedId) => {
+    if (activeTool !== 'select') return
+    if (!selectedIds.includes(draggedId)) return
+
+    const node = e.target
+    const draggedShape = shapes.find(s => s.id === draggedId)
+    if (!draggedShape) return
+
+    let dx = 0, dy = 0
+    if (draggedShape.tipo === 'cota') {
+      dx = node.x()
+      dy = node.y()
+    } else {
+      dx = node.x() - (Number(draggedShape.x) || 0)
+      dy = node.y() - (Number(draggedShape.y) || 0)
+    }
+
+    selectedIds.forEach(id => {
+      if (id === draggedId) return
+      const otherNode = shapeRefs.current[id]
+      if (!otherNode) return
+      const otherShape = shapes.find(s => s.id === id)
+      if (!otherShape) return
+
+      if (otherShape.tipo === 'cota') {
+        otherNode.position({ x: dx, y: dy })
+      } else {
+        otherNode.position({ x: (Number(otherShape.x) || 0) + dx, y: (Number(otherShape.y) || 0) + dy })
+      }
+    })
+  }
+
+  const handleMultiDragEnd = (e, draggedId) => {
+    if (activeTool !== 'select') return
+    const node = e.target
+    const draggedShape = shapes.find(s => s.id === draggedId)
+    if (!draggedShape) return
+
+    if (!selectedIds.includes(draggedId)) {
+      const snapX = Math.round(node.x() / 10) * 10
+      const snapY = Math.round(node.y() / 10) * 10
+      if (draggedShape.tipo !== 'cota') {
+        actualizarForma(draggedId, { x: snapX, y: snapY })
+        node.position({ x: snapX, y: snapY })
+      }
+      return
+    }
+
+    let dx = 0, dy = 0
+    if (draggedShape.tipo === 'cota') {
+      dx = node.x()
+      dy = node.y()
+      node.position({ x: 0, y: 0 })
+    } else {
+      dx = node.x() - (Number(draggedShape.x) || 0)
+      dy = node.y() - (Number(draggedShape.y) || 0)
+    }
+
+    const snapDx = Math.round(dx / 10) * 10
+    const snapDy = Math.round(dy / 10) * 10
+
+    const nextShapes = shapes.map(sh => {
+      if (selectedIds.includes(sh.id)) {
+        if (sh.tipo === 'cota') {
+          return { ...sh, x1: (Number(sh.x1)||0) + snapDx, y1: (Number(sh.y1)||0) + snapDy, x2: (Number(sh.x2)||0) + snapDx, y2: (Number(sh.y2)||0) + snapDy }
+        } else {
+          return { ...sh, x: (Number(sh.x)||0) + snapDx, y: (Number(sh.y)||0) + snapDy }
+        }
+      }
+      return sh
+    })
+    
+    selectedIds.forEach(id => {
+      const otherNode = shapeRefs.current[id]
+      if (otherNode && shapes.find(s => s.id === id)?.tipo === 'cota') {
+        otherNode.position({ x: 0, y: 0 })
+      }
+    })
+
+    dispatchChange(nextShapes)
   }
 
   const muroTieneConflicto = (id, rectCandidate) => {
@@ -688,7 +890,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     }
 
     const next = shapes.map((s) => (s.id === id ? actualizado : s))
-    onChange?.(next)
+    dispatchChange(next)
     return true
   }
 
@@ -696,26 +898,143 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     const tr = transformerRef.current
     if (!tr) return
 
-    // El Transformer solo opera sobre elementos tipo rect (muro/puerta/ventana).
-    // Usamos un rAF para garantizar que shapeRefs ya está poblado post-commit.
     const run = () => {
-      const selectedShape = shapes.find((s) => s.id === selectedId)
-      const esRect = selectedShape ? isTipoRect(selectedShape.tipo) : false
-      const node = (selectedId && esRect) ? shapeRefs.current[selectedId] : null
-      tr.nodes(node ? [node] : [])
+      const nodes = selectedIds
+        .map(id => shapeRefs.current[id])
+        .filter(Boolean)
+        .filter(node => isTipoRect(shapes.find(s => s.id === node.attrs.id)?.tipo || 'muro'));
+      tr.nodes(nodes)
       tr.getLayer()?.batchDraw()
       setIdEnConflicto(null)
     }
 
-    // requestAnimationFrame asegura que los ref callbacks de los <Rect> ya corrieron
     const raf = requestAnimationFrame(run)
     return () => cancelAnimationFrame(raf)
-  }, [selectedId, shapes])
+  }, [selectedIds, shapes])
 
-  const alPresionarFondo = (e) => {
-    const clickedOnEmpty = e.target === e.target.getStage()
-    if (clickedOnEmpty) setSelectedId(null)
+  const [isPanning, setIsPanning] = useState(false)
+  const lastPanPosRef = useRef({ x: 0, y: 0 })
+
+  const getPointerPos = (stage) => {
+    const pointer = stage.getPointerPosition()
+    const scale = stage.scaleX()
+    return {
+      x: (pointer.x - stage.x()) / scale,
+      y: (pointer.y - stage.y()) / scale,
+    }
   }
+
+  const handleStageMouseDown = (e) => {
+    // Paneo global si es middle, right, o espacio
+    if (e.evt.button === 1 || e.evt.button === 2 || isSpaceDown) {
+      setIsPanning(true)
+      lastPanPosRef.current = { x: e.evt.clientX, y: e.evt.clientY }
+      e.target.getStage().container().style.cursor = 'grabbing'
+      return
+    }
+
+    if (activeTool === 'pan' && e.evt.button === 0) {
+      setIsPanning(true)
+      lastPanPosRef.current = { x: e.evt.clientX, y: e.evt.clientY }
+      e.target.getStage().container().style.cursor = 'grabbing'
+      return
+    }
+
+    const clickedOnEmpty = e.target === e.target.getStage() || e.target.name() === 'bg-rect'
+    if (clickedOnEmpty) {
+      setSelectedIds([])
+      if (e.evt.button === 0) {
+        selectionStartRef.current = getPointerPos(e.target.getStage())
+        setSelectionRect({ ...selectionStartRef.current, width: 0, height: 0 })
+      }
+    }
+  }
+
+  const handleStageMouseMove = (e) => {
+    if (isPanning) {
+      const dx = e.evt.clientX - lastPanPosRef.current.x
+      const dy = e.evt.clientY - lastPanPosRef.current.y
+      setStagePos((prev) => ({ x: prev.x + dx, y: prev.y + dy }))
+      lastPanPosRef.current = { x: e.evt.clientX, y: e.evt.clientY }
+      return
+    }
+
+    if (!selectionStartRef.current) return
+    const pos = getPointerPos(e.target.getStage())
+    setSelectionRect({
+      x: Math.min(selectionStartRef.current.x, pos.x),
+      y: Math.min(selectionStartRef.current.y, pos.y),
+      width: Math.abs(pos.x - selectionStartRef.current.x),
+      height: Math.abs(pos.y - selectionStartRef.current.y),
+    })
+  }
+
+  const handleStageMouseUp = (e) => {
+    if (isPanning) {
+      setIsPanning(false)
+      e.target.getStage().container().style.cursor = 'default'
+    }
+
+    if (selectionStartRef.current && selectionRect) {
+      const box = selectionRect
+      const selected = shapes.filter((shape) => {
+        const sx = Number(shape.x) || 0
+        const sy = Number(shape.y) || 0
+        const sw = Number(shape.width) || 0
+        const sh = Number(shape.height) || 0
+        return (
+          sx >= box.x && sy >= box.y &&
+          sx + sw <= box.x + box.width &&
+          sy + sh <= box.y + box.height
+        )
+      })
+      setSelectedIds(selected.map((s) => s.id))
+    }
+    selectionStartRef.current = null
+    setSelectionRect(null)
+  }
+
+  const handleWheel = (e) => {
+    e.evt.preventDefault()
+    const scaleBy = 1.1
+    const stage = e.target.getStage()
+    const oldScale = stage.scaleX()
+    const pointer = stage.getPointerPosition()
+    const mousePointTo = {
+      x: (pointer.x - stage.x()) / oldScale,
+      y: (pointer.y - stage.y()) / oldScale,
+    }
+    const newScale = e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy
+    setStageScale(newScale)
+    setStagePos({
+      x: pointer.x - mousePointTo.x * newScale,
+      y: pointer.y - mousePointTo.y * newScale,
+    })
+  }
+
+  const zoomToFit = useCallback(() => {
+    if (!shapes.length) return
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    shapes.forEach(s => {
+      const sx = Number(s.x) || 0; const sy = Number(s.y) || 0
+      const sw = Number(s.width) || 0; const sh = Number(s.height) || 0
+      if (sx < minX) minX = sx
+      if (sy < minY) minY = sy
+      if (sx + sw > maxX) maxX = sx + sw
+      if (sy + sh > maxY) maxY = sy + sh
+    })
+    if (minX === Infinity) return
+    const padding = 50
+    const contentWidth = maxX - minX; const contentHeight = maxY - minY
+    const scaleX = (size.width - padding * 2) / (contentWidth || 1)
+    const scaleY = (size.height - padding * 2) / (contentHeight || 1)
+    const scale = Math.min(scaleX, scaleY, 1.5)
+    setStageScale(scale)
+    setStagePos({
+      x: size.width / 2 - (minX + contentWidth / 2) * scale,
+      y: size.height / 2 - (minY + contentHeight / 2) * scale,
+    })
+  }, [shapes, size])
 
   const estiloPorTipo = (tipo) => {
     if (modoExport) {
@@ -750,19 +1069,66 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
       {/* ── Widget de control (rotación + eliminar) para elemento seleccionado ── */}
       {selectedShape ? (
         <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
-          {/* Rotación: solo rect */}
+          {/* Panel de Propiedades: solo rect */}
           {isTipoRect(selectedShape.tipo) && (
-            <div className="rounded-xl border border-slate-700 bg-slate-950/95 text-white px-3 py-2 backdrop-blur">
-              <div className="text-[10px] text-slate-400 mb-1">Rotación · {selectedShape.tipo}</div>
-              <select
-                className="h-8 rounded-lg bg-slate-900 border border-slate-700 px-2 text-sm w-full"
-                value={snapGrados(Number(selectedShape.rotation) || 0)}
-                onChange={(e) => aplicarRotacionSeleccion(e.target.value)}
-              >
-                {ROTACION_SNAPS.map((deg) => (
-                  <option key={deg} value={deg}>{deg}°</option>
-                ))}
-              </select>
+            <div className="rounded-xl border border-slate-700 bg-slate-950/95 text-white px-3 py-2 backdrop-blur flex items-center gap-4 shadow-xl">
+              <div className="flex flex-col">
+                <span className="text-[10px] text-slate-400 mb-1">Rotación</span>
+                <select
+                  className="h-8 rounded-lg bg-slate-900 border border-slate-700 px-2 text-sm w-20 focus:outline-none focus:border-sky-500"
+                  value={snapGrados(Number(selectedShape.rotation) || 0)}
+                  onChange={(e) => aplicarRotacionSeleccion(e.target.value)}
+                >
+                  {ROTACION_SNAPS.map((deg) => (
+                    <option key={deg} value={deg}>{deg}°</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="w-px h-8 bg-slate-700"></div>
+
+              <div className="flex flex-col">
+                <span className="text-[10px] text-slate-400 mb-1">Longitud (m)</span>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0.1"
+                  className="h-8 rounded-lg bg-slate-900 border border-slate-700 px-2 text-sm w-20 focus:outline-none focus:border-sky-500"
+                  value={aMetros(Math.max(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0))}
+                  onChange={(e) => {
+                    const valM = parseFloat(e.target.value)
+                    if (isNaN(valM) || valM <= 0) return
+                    const valPx = valM * 100
+                    const isHoriz = (Number(selectedShape.width) || 0) >= (Number(selectedShape.height) || 0)
+                    const patch = isHoriz ? { width: valPx } : { height: valPx }
+                    actualizarForma(selectedShape.id, patch)
+                  }}
+                />
+              </div>
+
+              {tieneEspesorFijo(selectedShape.tipo) && (
+                <>
+                  <div className="w-px h-8 bg-slate-700"></div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-slate-400 mb-1">Grosor (m)</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.05"
+                      className="h-8 rounded-lg bg-slate-900 border border-slate-700 px-2 text-sm w-20 focus:outline-none focus:border-sky-500"
+                      value={aMetros(Math.min(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0))}
+                      onChange={(e) => {
+                        const valM = parseFloat(e.target.value)
+                        if (isNaN(valM) || valM <= 0) return
+                        const valPx = valM * 100
+                        const isHoriz = (Number(selectedShape.width) || 0) >= (Number(selectedShape.height) || 0)
+                        const patch = isHoriz ? { height: valPx } : { width: valPx }
+                        actualizarForma(selectedShape.id, patch)
+                      }}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           )}
           {/* Tipo label para no-rect */}
@@ -831,13 +1197,58 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
         </div>
       ) : null}
 
-      <Stage ref={stageRef} width={size.width} height={size.height} onMouseDown={alPresionarFondo}>
+      {/* ── Toolbar de Herramientas (Select / Pan) ── */}
+      <div className="absolute bottom-6 left-8 z-50 flex flex-col items-center gap-2 p-1.5 rounded-2xl bg-slate-900/95 border border-slate-700 backdrop-blur-md shadow-2xl">
+        <button
+          onClick={() => setActiveTool('select')}
+          className={`flex items-center justify-center w-8 h-8 rounded-xl transition-all ${
+            activeTool === 'select' ? 'bg-sky-500 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+          title="Seleccionar (V)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>
+        </button>
+        <button
+          onClick={() => setActiveTool('pan')}
+          className={`flex items-center justify-center w-8 h-8 rounded-xl transition-all ${
+            activeTool === 'pan' ? 'bg-sky-500 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+          title="Mover Lienzo (H)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v4"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V3a2 2 0 0 0-4 0v9"/><path d="M6 12v-1a2 2 0 0 0-4 0v5a8 8 0 0 0 8 8h2a8 8 0 0 0 7-7.3l.5-4.7a3 3 0 0 0-3-3H14"/></svg>
+        </button>
+        <div className="w-5 h-px bg-slate-700 my-0.5"></div>
+        <button
+          onClick={zoomToFit}
+          className="flex items-center justify-center w-8 h-8 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-all"
+          title="Centrar Todo"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h4v2H6v2H4zm16 0h-4v2h2v2h2zM4 20h4v-2H6v-2H4zm16 0h-4v-2h2v-2h2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+
+      <Stage 
+        ref={stageRef} 
+        width={size.width} 
+        height={size.height} 
+        onMouseDown={handleStageMouseDown}
+        onMouseMove={handleStageMouseMove}
+        onMouseUp={handleStageMouseUp}
+        onWheel={handleWheel}
+        scaleX={stageScale}
+        scaleY={stageScale}
+        x={stagePos.x}
+        y={stagePos.y}
+        draggable={isSpaceDown || undefined}
+      >
         <Layer>
+
           <Rect
-            x={0}
-            y={0}
-            width={size.width}
-            height={size.height}
+            name="bg-rect"
+            x={-stagePos.x / stageScale}
+            y={-stagePos.y / stageScale}
+            width={size.width / stageScale}
+            height={size.height / stageScale}
             fill={modoExport ? '#FFFFFF' : isDark ? '#0F172A' : '#FFFFFF'}
           />
 
@@ -870,6 +1281,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
           {shapes.filter((s) => isTipoRect(s.tipo)).map((s) => (
             <Rect
               key={s.id}
+              id={s.id}
               ref={(node) => {
                 if (!node) return
                 shapeRefs.current[s.id] = node
@@ -882,13 +1294,27 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
               {...(idEnConflicto === s.id && s.tipo === 'muro'
                 ? { fill: '#EF4444', opacity: 0.85 }
                 : estiloPorTipo(s.tipo))}
-              stroke={selectedId === s.id ? (isDark ? '#38BDF8' : '#0F172A') : undefined}
-              strokeWidth={selectedId === s.id ? 1.5 : 0}
+              stroke={selectedIds.includes(s.id) ? (isDark ? '#38BDF8' : '#0F172A') : undefined}
+              strokeWidth={selectedIds.includes(s.id) ? 1.5 : 0}
               cornerRadius={2}
-              draggable
-              onClick={() => setSelectedId(s.id)}
-              onTap={() => setSelectedId(s.id)}
+              draggable={activeTool === 'select'}
+              onClick={(e) => {
+                if (activeTool !== 'select') return;
+                if (e.evt.shiftKey) {
+                  setSelectedIds(prev => prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id])
+                } else {
+                  setSelectedIds([s.id])
+                }
+              }}
+              onTap={() => { if (activeTool === 'select') setSelectedIds([s.id]) }}
+              onDragStart={() => {
+                if (activeTool !== 'select') return;
+                if (!selectedIds.includes(s.id)) {
+                  setSelectedIds([s.id])
+                }
+              }}
               onDragMove={(e) => {
+                handleMultiDragMove(e, s.id)
                 if (s.tipo !== 'muro') return
                 const nx = e.target.x(), ny = e.target.y()
                 // Snap magnético
@@ -911,19 +1337,23 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
               onDragEnd={(e) => {
                 setIdEnConflicto(null)
                 setSnapPos(null)
-                const ok = actualizarForma(s.id, { x: e.target.x(), y: e.target.y() })
-                if (!ok) {
-                  e.target.position({ x: Number(s.x) || 0, y: Number(s.y) || 0 })
-                  e.target.getLayer()?.batchDraw()
-                }
+                handleMultiDragEnd(e, s.id)
               }}
               onTransform={(e) => {
                 const node = e.target
                 const snappedRotation = snapGrados(node.rotation())
                 if (node.rotation() !== snappedRotation) {
                   node.rotation(snappedRotation)
-                  node.getLayer()?.batchDraw()
                 }
+                if (tieneEspesorFijo(s.tipo)) {
+                  const isLocalHorizontal = (Number(s.width) || 0) >= (Number(s.height) || 0)
+                  if (isLocalHorizontal) {
+                    node.scaleY(1) // El espesor está en Y, mantener escala 1
+                  } else {
+                    node.scaleX(1) // El espesor está en X, mantener escala 1
+                  }
+                }
+                node.getLayer()?.batchDraw()
                 if (s.tipo !== 'muro') return
                 const rect = clientRectDeNode(node)
                 setIdEnConflicto(muroTieneConflicto(s.id, rect) ? s.id : null)
@@ -936,22 +1366,29 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                 node.scaleX(1)
                 node.scaleY(1)
                 const patch = { x: node.x(), y: node.y(), rotation }
-                const widthCandidate = Math.max(6, node.width() * scaleX)
-                const heightCandidate = Math.max(6, node.height() * scaleY)
+                
                 if (tieneEspesorFijo(s.tipo)) {
                   const esp = espesorPxPorTipo(s.tipo)
-                  const largo = Math.max(widthCandidate, heightCandidate)
-                  const esHorizontal = widthCandidate >= heightCandidate
-                  const width = esHorizontal ? largo : esp
-                  const height = esHorizontal ? esp : largo
-                  patch.width = width
-                  patch.height = height
-                  node.width(width)
-                  node.height(height)
+                  const isLocalHorizontal = (Number(s.width) || 0) >= (Number(s.height) || 0)
+                  
+                  if (isLocalHorizontal) {
+                    patch.width = Math.max(6, node.width() * scaleX)
+                    patch.height = esp
+                    node.width(patch.width)
+                    node.height(esp)
+                  } else {
+                    patch.width = esp
+                    patch.height = Math.max(6, node.height() * scaleY)
+                    node.width(esp)
+                    node.height(patch.height)
+                  }
                 } else {
-                  patch.width = widthCandidate
-                  patch.height = heightCandidate
+                  patch.width = Math.max(6, node.width() * scaleX)
+                  patch.height = Math.max(6, node.height() * scaleY)
+                  node.width(patch.width)
+                  node.height(patch.height)
                 }
+                
                 setIdEnConflicto(null)
                 const ok = actualizarForma(s.id, patch)
                 if (!ok) {
@@ -965,7 +1402,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
             />
           ))}
 
-          {/* ── Overlay símbolo arquitectónico de PUERTA (Arc+Line, no interactivo) ── */}
+          {/* ── Overlay símbolo arquitectónico de PUERTA ── */}
           {shapes.filter((s) => s.tipo === 'puerta').map((s) => {
             const w = Number(s.width) || 0
             const h = Number(s.height) || 0
@@ -1060,29 +1497,67 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
 
           {/* ── Etiquetas de medida para elementos rect ── */}
           {shapes.filter((s) => isTipoRect(s.tipo)).map((s) => {
+            if (!selectedIds.includes(s.id)) return null;
+
             const w = Number(s.width) || 0
             const h = Number(s.height) || 0
-            const lengthPx = tieneEspesorFijo(s.tipo) ? Math.max(w, h) : w
+            const lengthPx = tieneEspesorFijo(s.tipo) ? Math.max(w, h) : Math.max(w, h)
+            const isLocalVertical = h > w;
+
             const m = aMetros(lengthPx)
-            const label = `${m.toFixed(2)} m`
-            const x = (Number(s.x) || 0) + 4
-            const y = (Number(s.y) || 0) - 18
+            const label = `${m.toFixed(2)}m`
+
+            const baseX = Number(s.x) || 0;
+            const baseY = Number(s.y) || 0;
+            const rot = Number(s.rotation) || 0;
+
+            const rad = rot * Math.PI / 180;
+            const cx = baseX + (w / 2) * Math.cos(rad) - (h / 2) * Math.sin(rad);
+            const cy = baseY + (w / 2) * Math.sin(rad) + (h / 2) * Math.cos(rad);
+
+            let textRot = rot;
+            if (isLocalVertical) {
+                textRot += 90; 
+            }
+            // Normalizar para que el texto nunca quede de cabeza
+            while (textRot > 90) textRot -= 180;
+            while (textRot <= -90) textRot += 180;
+
             return (
-              <Text
-                key={`${s.id}-measure`}
-                x={x}
-                y={y}
-                text={label}
-                fontSize={12}
-                fill={isDark ? '#E2E8F0' : '#0F172A'}
-                opacity={0.9}
-              />
+              <Group 
+                key={`${s.id}-measure`} 
+                x={cx} 
+                y={cy} 
+                rotation={textRot} 
+                listening={false}
+              >
+                <Rect
+                  x={-22} y={-10}
+                  width={44} height={20}
+                  fill={isDark ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.9)"}
+                  cornerRadius={6}
+                  shadowColor="black"
+                  shadowBlur={4}
+                  shadowOpacity={0.15}
+                  shadowOffsetY={1}
+                />
+                <Text
+                  x={-22} y={-5.5}
+                  width={44}
+                  text={label}
+                  fontSize={11}
+                  fontFamily="Inter, sans-serif"
+                  fontWeight="700"
+                  align="center"
+                  fill={isDark ? '#38BDF8' : '#0369A1'}
+                />
+              </Group>
             )
           })}
 
           {/* ── TEXTO libre ── */}
           {shapes.filter((s) => s.tipo === 'texto').map((s) => {
-            const isSelected = selectedId === s.id
+            const isSelected = selectedIds.includes(s.id)
             const isEditing = editingId === s.id
             const textColor = isDark ? '#A5F3FC' : '#1D4ED8'   // cyan-200 / blue-700
             const bgColor = isDark ? 'rgba(14,165,233,0.10)' : 'rgba(29,78,216,0.07)'
@@ -1101,18 +1576,26 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
             return (
               <Group
                 key={s.id}
+                ref={(node) => { if (node) shapeRefs.current[s.id] = node }}
                 x={px}
                 y={py}
-                draggable={!isEditing}
-                onClick={() => setSelectedId(s.id)}
-                onTap={() => setSelectedId(s.id)}
+                draggable={!isEditing && activeTool === 'select'}
+                onClick={(e) => {
+                  if (activeTool !== 'select') return;
+                  if (e.evt.shiftKey) setSelectedIds(prev => prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id])
+                  else setSelectedIds([s.id])
+                }}
+                onTap={() => { if (activeTool === 'select') setSelectedIds([s.id]) }}
                 onDblClick={(e) => {
-                  setSelectedId(s.id)
+                  if (activeTool !== 'select') return;
+                  setSelectedIds([s.id])
                   abrirEditorTexto(s, e.target)
                 }}
-                onDragEnd={(e) => {
-                  actualizarForma(s.id, { x: e.target.x(), y: e.target.y() })
+                onDragStart={(e) => {
+                  if (!selectedIds.includes(s.id)) setSelectedIds([s.id])
                 }}
+                onDragMove={(e) => handleMultiDragMove(e, s.id)}
+                onDragEnd={(e) => handleMultiDragEnd(e, s.id)}
               >
                 {/* Fondo pastilla */}
                 <Rect
@@ -1158,7 +1641,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
             const cx = (x1 + x2) / 2
             const cy = (y1 + y2) / 2
             const { a: tickA, b: tickB } = cotaTicks({ x1, y1, x2, y2, tick: 10 })
-            const isSelected = selectedId === s.id
+            const isSelected = selectedIds.includes(s.id)
             const isEditing = editingId === s.id
 
             // Paleta de cota: naranja cálido
@@ -1173,15 +1656,19 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
               <Group key={s.id}>
                 {/* ── Grupo principal arrastrable (línea + ticks + label) ── */}
                 <Group
-                  draggable
-                  onClick={() => setSelectedId(s.id)}
-                  onTap={() => setSelectedId(s.id)}
-                  onDragEnd={(e) => {
-                    const dx = e.target.x()
-                    const dy = e.target.y()
-                    actualizarForma(s.id, { x1: x1 + dx, y1: y1 + dy, x2: x2 + dx, y2: y2 + dy })
-                    e.target.position({ x: 0, y: 0 })
+                  ref={(node) => { if (node) shapeRefs.current[s.id] = node }}
+                  draggable={activeTool === 'select'}
+                  onClick={(e) => {
+                    if (activeTool !== 'select') return;
+                    if (e.evt.shiftKey) setSelectedIds(prev => prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id])
+                    else setSelectedIds([s.id])
                   }}
+                  onTap={() => { if (activeTool === 'select') setSelectedIds([s.id]) }}
+                  onDragStart={(e) => {
+                    if (!selectedIds.includes(s.id)) setSelectedIds([s.id])
+                  }}
+                  onDragMove={(e) => handleMultiDragMove(e, s.id)}
+                  onDragEnd={(e) => handleMultiDragEnd(e, s.id)}
                 >
                   {/* Línea principal */}
                   <Line
@@ -1199,7 +1686,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                     x={cx - badgeW / 2}
                     y={cy - 14}
                     onDblClick={(e) => {
-                      setSelectedId(s.id)
+                      setSelectedIds([s.id])
                       abrirEditorTexto(s, e.target)
                     }}
                   >
@@ -1277,22 +1764,31 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
             const rot = Number(s.rotacion) || 0
             if (!svgPath) return null
 
-            const isSelected = selectedId === s.id
+            const isSelected = selectedIds.includes(s.id)
             const { fill: symFill, stroke: symStroke, bg: symBg } = symbolColors(s.nombre, isDark)
             const selBorder = isDark ? '#F472B6' : '#DB2777'   // pink selección
 
             return (
               <Group
                 key={s.id}
+                ref={(node) => { if (node) shapeRefs.current[s.id] = node }}
                 x={Number(s.x) || 0}
                 y={Number(s.y) || 0}
                 rotation={rot}
                 scaleX={escala}
                 scaleY={escala}
-                draggable
-                onClick={() => setSelectedId(s.id)}
-                onTap={() => setSelectedId(s.id)}
-                onDragEnd={(e) => actualizarForma(s.id, { x: e.target.x(), y: e.target.y() })}
+                draggable={activeTool === 'select'}
+                onClick={(e) => {
+                  if (activeTool !== 'select') return;
+                  if (e.evt.shiftKey) setSelectedIds(prev => prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id])
+                  else setSelectedIds([s.id])
+                }}
+                onTap={() => { if (activeTool === 'select') setSelectedIds([s.id]) }}
+                onDragStart={(e) => {
+                  if (!selectedIds.includes(s.id)) setSelectedIds([s.id])
+                }}
+                onDragMove={(e) => handleMultiDragMove(e, s.id)}
+                onDragEnd={(e) => handleMultiDragEnd(e, s.id)}
               >
                 {/* Fondo con color de categoría */}
                 <Rect
@@ -1336,7 +1832,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
               selectedShape?.tipo && tieneEspesorFijo(selectedShape.tipo)
                 ? (Number(selectedShape.width) || 0) >= (Number(selectedShape.height) || 0)
                   ? ['middle-left', 'middle-right']
-                  : ['middle-top', 'middle-bottom']
+                  : ['top-center', 'bottom-center']
                 : ['top-left', 'top-right', 'bottom-left', 'bottom-right']
             }
             borderStroke={isDark ? '#38BDF8' : '#0F172A'}
@@ -1347,6 +1843,19 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
               return newBox
             }}
           />
+
+          {selectionRect && !modoExport && (
+            <Rect
+              x={selectionRect.x}
+              y={selectionRect.y}
+              width={selectionRect.width}
+              height={selectionRect.height}
+              fill="rgba(56, 189, 248, 0.2)"
+              stroke="#38BDF8"
+              strokeWidth={1}
+              listening={false}
+            />
+          )}
         </Layer>
       </Stage>
     </div>
