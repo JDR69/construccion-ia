@@ -220,3 +220,4 @@ export function ElementsPalette({ isDark }) {
     </div>
   )
 }
+
