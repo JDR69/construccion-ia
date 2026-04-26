@@ -47,3 +47,39 @@ python manage.py runserver 8000
 # & ".\.venv\Scripts\python.exe" manage.py runserver 8000
 ```
 
+## Nuevas funciones implementadas
+
+### 1) Scraping cacheado en base de datos
+
+- Los precios scrapeados ahora se guardan en BD y se reutilizan por antiguedad (cache_horas).
+- Se agrego comando de refresco para ejecutar manual o semanal:
+
+```powershell
+cd backend
+python manage.py refrescar_precios_materiales --force
+python manage.py refrescar_precios_materiales --cache-horas 168
+python manage.py refrescar_precios_materiales --materiales cemento ladrillo arena
+python manage.py refrescar_precios_materiales --dry-run --force
+python manage.py refrescar_precios_materiales --insucons-todo --dry-run --force
+python manage.py refrescar_precios_materiales --insucons-todo --force
+```
+
+### 2) IA multimodo (imagen, texto, hibrido)
+
+- Endpoint existente: POST /api/planos/{id}/procesar-ia/
+- Campos soportados en multipart/form-data:
+	- modo: image | text | hybrid
+	- file: imagen (requerida en image/hybrid)
+	- prompt: texto libre del usuario
+	- opciones: JSON con opciones guiadas
+	- escala_metros_por_pixel: numero > 0 (opcional)
+
+### 3) Presupuesto aproximado automatico
+
+- POST /api/presupuestos/{id}/generar-automatico/
+	- body JSON: {"modo": "rapido" | "refinado" | "hibrido"}
+- POST /api/presupuestos/{id}/refinar-desde-plano/
+- GET /api/presupuestos/{id}/total/
+
+El calculo usa una estimacion por m2 y puede refinarse con geometria de muros/puertas/ventanas del plano vectorial.
+

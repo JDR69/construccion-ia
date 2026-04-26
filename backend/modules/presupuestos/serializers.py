@@ -4,6 +4,9 @@ from .models import AuditoriaPresupuesto, Presupuesto, PresupuestoItem
 
 
 class PresupuestoSerializer(serializers.ModelSerializer):
+    total = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    total_items = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Presupuesto
         fields = [
@@ -13,6 +16,8 @@ class PresupuestoSerializer(serializers.ModelSerializer):
             "creado_por",
             "nombre",
             "notas",
+            "total",
+            "total_items",
             "creado_en",
             "actualizado_en",
         ]
@@ -21,6 +26,7 @@ class PresupuestoSerializer(serializers.ModelSerializer):
 
 class PresupuestoItemSerializer(serializers.ModelSerializer):
     subtotal = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    material_nombre = serializers.CharField(source='material.nombre', read_only=True)
 
     class Meta:
         model = PresupuestoItem
@@ -28,6 +34,7 @@ class PresupuestoItemSerializer(serializers.ModelSerializer):
             "id",
             "presupuesto",
             "material",
+            "material_nombre",
             "cantidad",
             "precio_unitario",
             "subtotal",

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 
 
 class Presupuesto(models.Model):
@@ -34,6 +35,18 @@ class Presupuesto(models.Model):
 
     def __str__(self):
         return self.nombre
+
+    @property
+    def total(self):
+        calculo = ExpressionWrapper(
+            F("cantidad") * F("precio_unitario"),
+            output_field=DecimalField(max_digits=16, decimal_places=2),
+        )
+        return self.items.aggregate(total=Sum(calculo)).get("total") or 0
+
+    @property
+    def total_items(self):
+        return self.items.count()
 
 
 class PresupuestoItem(models.Model):

@@ -12,6 +12,10 @@ class Plano(models.Model):
 
     # Importante: datos vectoriales (IA/OCR) como JSON
     datos_vectoriales = models.JSONField(default=dict, blank=True)
+    modo_generacion = models.CharField(max_length=20, default="image", blank=True)
+    prompt_usuario = models.TextField(blank=True)
+    opciones_generacion = models.JSONField(default=dict, blank=True)
+    escala_metros_por_pixel = models.DecimalField(max_digits=12, decimal_places=6, default=0.01)
 
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)

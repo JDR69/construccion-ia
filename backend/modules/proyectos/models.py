@@ -11,6 +11,7 @@ class Proyecto(models.Model):
     )
     titulo = models.CharField(max_length=100)
     descripcion = models.CharField(max_length=250)
+    num_pisos = models.PositiveSmallIntegerField(default=1, help_text="Número de pisos de la construcción")
     fechaCreacion = models.DateTimeField(auto_now_add=True)
 
     class Meta:

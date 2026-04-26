@@ -5,7 +5,7 @@
 
 import { Button } from './Button'
 
-export function Modal({ open, title, children, onClose, footer }) {
+export function Modal({ open, title, children, onClose, footer, maxWidthClass = 'max-w-lg', panelClassName = '' }) {
   /* No renderiza nada si está cerrado */
   if (!open) return null
 
@@ -18,7 +18,11 @@ export function Modal({ open, title, children, onClose, footer }) {
       />
 
       {/* Cuerpo del modal */}
-      <div className="relative w-full max-w-lg rounded-2xl border border-white/10 bg-[#0d1526] shadow-2xl shadow-black/50">
+      <div className={[
+        'relative w-full rounded-2xl border border-white/10 bg-[#0d1526] shadow-2xl shadow-black/50',
+        maxWidthClass,
+        panelClassName,
+      ].join(' ')}>
 
         {/* Encabezado con título y botón cerrar */}
         <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">

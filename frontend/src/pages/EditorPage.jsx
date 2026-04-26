@@ -20,6 +20,26 @@ export function EditorPage() {
     return true
   })
 
+  // Panel de previews de IA
+  const [showPreviews, setShowPreviews] = useState(false)
+
+  // Cuando hay previews nuevos, mostrar el panel automaticamente
+  const handleIAPreviews = (previews) => {
+    setIAPreviews(previews)
+    if (previews) {
+      setShowPreviews(true)
+    }
+  }
+
+  // Toggle del panel de previews
+  const togglePreviews = () => {
+    setShowPreviews((v) => {
+      const next = !v
+      // Si se abre y no hay previews, generar empty state
+      return next
+    })
+  }
+
   useEffect(() => {
     const root = document.documentElement
     if (isDark) root.classList.add('dark')
@@ -47,8 +67,7 @@ export function EditorPage() {
   const [saving, setSaving] = useState(false)
 
   const workspaceRef = useRef(null)
-  const [postIAModalOpen, setPostIAModalOpen] = useState(false)
-  const [postIAStep, setPostIAStep] = useState('choice') // choice | save
+  const [iaPreviews, setIAPreviews] = useState(null)
 
   const [proyecto, setProyecto] = useState(null)
 
@@ -131,12 +150,11 @@ export function EditorPage() {
         <SubidaPlanoIA
           isProcessing={isProcessingIA}
           error={error}
-          onUpload={async (file) => {
+          onUpload={async (payload) => {
             try {
-              await procesarIA(file)
+              const response = await procesarIA(payload)
+              handleIAPreviews(response?.previews || null)
               setMode('auto')
-              setPostIAStep('choice')
-              setPostIAModalOpen(true)
             } catch {
               // El hook ya setea `error`; aquí evitamos unhandled promise.
             }
@@ -161,54 +179,11 @@ export function EditorPage() {
           saving={saving}
           isDark={isDark}
           onToggleTheme={() => setIsDark((v) => !v)}
+          iaPreviews={iaPreviews}
+          showPreviews={showPreviews}
+          onTogglePreviews={togglePreviews}
         />
       )}
-
-      <Modal
-        open={postIAModalOpen && hasVectorData}
-        title="Plano generado con IA"
-        onClose={() => setPostIAModalOpen(false)}
-        footer={
-          postIAStep === 'choice' ? (
-            <div className="flex w-full items-center justify-end gap-2">
-              <Button variant="secondary" onClick={() => setPostIAModalOpen(false)}>
-                Editar
-              </Button>
-              <Button onClick={() => setPostIAStep('save')}>Guardar</Button>
-            </div>
-          ) : (
-            <div className="flex w-full items-center justify-end gap-2">
-              <Button
-                variant="secondary"
-                onClick={async () => {
-                  await workspaceRef.current?.exportarJpg?.()
-                  setPostIAModalOpen(false)
-                }}
-              >
-                JPG
-              </Button>
-              <Button
-                onClick={async () => {
-                  await workspaceRef.current?.exportarPdf?.()
-                  setPostIAModalOpen(false)
-                }}
-              >
-                PDF
-              </Button>
-            </div>
-          )
-        }
-      >
-        {postIAStep === 'choice' ? (
-          <div className="text-sm text-slate-200">
-            ¿Qué deseas hacer con el plano generado?
-          </div>
-        ) : (
-          <div className="text-sm text-slate-200">
-            ¿En qué formato deseas guardarlo?
-          </div>
-        )}
-      </Modal>
 
       {!isLoading && planoData ? (
         <div className="absolute bottom-3 left-3 text-xs text-slate-400">

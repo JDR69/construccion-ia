@@ -1,4 +1,5 @@
 import logging
+import json
 
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -6,6 +7,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from .services.gemini_service import GeminiServiceError, procesar_plano_con_gemini
+from .services.preview_service import generar_pack_previews
 from django.conf import settings
 
 from .models import Ambiente, Plano
@@ -35,78 +37,156 @@ class PlanoViewSet(viewsets.ModelViewSet):
         parser_classes=[MultiPartParser, FormParser],
     )
     def procesar_ia(self, request, pk=None):
-        try:
-            plano = self.get_object()
+        plano = self.get_object()
 
-            upload = request.FILES.get("file") or request.FILES.get("image")
-            if not upload:
-                return Response(
-                    {"detail": "Debes enviar un archivo en multipart/form-data con el campo 'file'."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            max_mb = 10
-            if getattr(upload, "size", 0) and upload.size > max_mb * 1024 * 1024:
-                return Response(
-                    {"detail": f"La imagen es demasiado grande (máximo {max_mb}MB)."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            from PIL import Image
-        except Exception:
-            import sys
-
-            hint = ""
-            if getattr(settings, "DEBUG", False):
-                hint = f" (python={sys.executable})"
+        modo = str(request.data.get("modo") or "image").strip().lower()
+        if modo not in {"image", "text", "hybrid"}:
             return Response(
-                {
-                    "detail": (
-                        "Pillow no está instalado en el backend. "
-                        "Instala dependencias con -r requirements.txt y ejecuta el backend con el .venv." + hint
-                    )
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                {"detail": "El campo 'modo' debe ser: image, text o hybrid."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
+        prompt_usuario = str(request.data.get("prompt") or "").strip()
+        opciones_raw = request.data.get("opciones")
+        opciones = {}
+        if isinstance(opciones_raw, dict):
+            opciones = opciones_raw
+        elif isinstance(opciones_raw, str) and opciones_raw.strip():
+            try:
+                opciones = json.loads(opciones_raw)
+            except json.JSONDecodeError:
+                return Response(
+                    {"detail": "El campo 'opciones' debe ser JSON válido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if modo == "text" and not prompt_usuario and not opciones:
+            return Response(
+                {"detail": "En modo text debes enviar prompt o opciones."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        upload = request.FILES.get("file") or request.FILES.get("image")
+        if modo in {"image", "hybrid"} and not upload:
+            return Response(
+                {"detail": "Debes enviar un archivo en multipart/form-data con el campo 'file'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        escala_metros_por_pixel = request.data.get("escala_metros_por_pixel")
+        if escala_metros_por_pixel not in (None, ""):
+            try:
+                escala_metros_por_pixel = float(escala_metros_por_pixel)
+                if escala_metros_por_pixel <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "'escala_metros_por_pixel' debe ser un número mayor a 0."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         try:
-            img = Image.open(upload)
-            # Corrige rotación por EXIF (muy común en fotos de celular)
-            try:
-                from PIL import ImageOps, ImageEnhance
+            img = None
+            if upload:
+                max_mb = 10
+                if getattr(upload, "size", 0) and upload.size > max_mb * 1024 * 1024:
+                    return Response(
+                        {"detail": f"La imagen es demasiado grande (máximo {max_mb}MB)."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
-                img = ImageOps.exif_transpose(img)
-            except Exception:
-                pass
+                try:
+                    from PIL import Image
+                except Exception:
+                    import sys
 
-            img = img.convert("RGB")
+                    hint = ""
+                    if getattr(settings, "DEBUG", False):
+                        hint = f" (python={sys.executable})"
+                    return Response(
+                        {
+                            "detail": (
+                                "Pillow no está instalado en el backend. "
+                                "Instala dependencias con -r requirements.txt y ejecuta el backend con el .venv."
+                                + hint
+                            )
+                        },
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
 
-            # Mejora contraste/nitidez para líneas finas del plano
-            try:
-                from PIL import ImageOps, ImageEnhance
+                img = Image.open(upload)
+                # Corrige rotación por EXIF (muy común en fotos de celular)
+                try:
+                    from PIL import ImageEnhance, ImageOps
 
-                img = ImageOps.autocontrast(img)
-                img = ImageEnhance.Sharpness(img).enhance(1.6)
-            except Exception:
-                pass
+                    img = ImageOps.exif_transpose(img)
+                except Exception:
+                    pass
 
-            # Reducción segura para evitar inputs enormes
-            # 1600px suele perder muros/lineas finas; mantenemos más detalle.
-            max_side = 3072
-            if max(img.size) > max_side:
-                img.thumbnail((max_side, max_side))
+                img = img.convert("RGB")
+
+                # Mejora contraste/nitidez para líneas finas del plano.
+                try:
+                    from PIL import ImageEnhance, ImageOps
+
+                    img = ImageOps.autocontrast(img)
+                    img = ImageEnhance.Sharpness(img).enhance(1.6)
+                except Exception:
+                    pass
+
+                # Reducción segura para evitar inputs enormes.
+                max_side = 3072
+                if max(img.size) > max_side:
+                    img.thumbnail((max_side, max_side))
 
             provider = str(getattr(settings, "IA_PROVIDER", "gemini") or "gemini").lower()
             if provider == "openai":
                 from .services.openai_service import procesar_plano_con_openai
 
-                result = procesar_plano_con_openai(image_pil=img)
+                result = procesar_plano_con_openai(
+                    image_pil=img,
+                    prompt_usuario=prompt_usuario,
+                    opciones=opciones,
+                    modo=modo,
+                )
             else:
-                result = procesar_plano_con_gemini(image_pil=img)
+                result = procesar_plano_con_gemini(
+                    image_pil=img,
+                    prompt_usuario=prompt_usuario,
+                    opciones=opciones,
+                    modo=modo,
+                )
             plano.datos_vectoriales = result.vector_data
-            plano.save(update_fields=["datos_vectoriales", "actualizado_en"])
 
-            return Response(result.vector_data, status=status.HTTP_200_OK)
+            update_fields = [
+                "datos_vectoriales",
+                "modo_generacion",
+                "prompt_usuario",
+                "opciones_generacion",
+                "actualizado_en",
+            ]
+            plano.modo_generacion = modo
+            plano.prompt_usuario = prompt_usuario
+            plano.opciones_generacion = opciones
+            if escala_metros_por_pixel not in (None, ""):
+                plano.escala_metros_por_pixel = escala_metros_por_pixel
+                update_fields.append("escala_metros_por_pixel")
+
+            plano.save(update_fields=update_fields)
+
+            previews = None
+            try:
+                previews = generar_pack_previews(result.vector_data, opciones)
+            except Exception:  # noqa: BLE001
+                logger.exception("No se pudieron generar previews del plano")
+
+            return Response(
+                {
+                    "vector_data": result.vector_data,
+                    "previews": previews,
+                },
+                status=status.HTTP_200_OK,
+            )
 
         except GeminiServiceError as e:
             return Response(

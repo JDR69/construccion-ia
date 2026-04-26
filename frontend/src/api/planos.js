@@ -24,10 +24,25 @@ export async function updateDatosVectoriales(planoId, json) {
   return res.data
 }
 
-// IA real: envía una imagen al backend para que Gemini genere datos vectoriales.
-export async function procesarPlanoIA(planoId, file) {
+// IA real: soporta modo imagen, texto o híbrido.
+export async function procesarPlanoIA(planoId, payload) {
   const form = new FormData()
-  form.append('file', file)
+
+  if (payload instanceof File) {
+    form.append('file', payload)
+    form.append('modo', 'image')
+  } else {
+    const data = payload ?? {}
+    if (data.file) form.append('file', data.file)
+    form.append('modo', data.modo || 'image')
+    if (data.prompt) form.append('prompt', data.prompt)
+    if (data.opciones && Object.keys(data.opciones).length > 0) {
+      form.append('opciones', JSON.stringify(data.opciones))
+    }
+    if (data.escala_metros_por_pixel) {
+      form.append('escala_metros_por_pixel', String(data.escala_metros_por_pixel))
+    }
+  }
 
   const res = await http.post(`${BASE}${planoId}/procesar-ia/`, form, {
     headers: { 'Content-Type': 'multipart/form-data' },

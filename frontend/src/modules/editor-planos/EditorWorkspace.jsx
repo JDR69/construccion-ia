@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 
 import { CanvasBoard } from './CanvasBoard'
 import { EditorToolbar } from './EditorToolbar'
@@ -22,11 +22,18 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     saving,
     isDark,
     onToggleTheme,
+    iaPreviews,      // Previews generados por IA
+    showPreviews,    // Si el panel de previews esta visible
+    onTogglePreviews, // Toggle del panel de previews
   },
   ref,
 ) {
   const canvasRef     = useRef(null)
   const canvasDivRef  = useRef(null)   // div contenedor del Stage (para getBoundingClientRect)
+  
+  const [canUndoState, setCanUndoState] = useState(false)
+  const [canRedoState, setCanRedoState] = useState(false)
+  const [zoomLevelState, setZoomLevelState] = useState('100%')
 
   useImperativeHandle(
     ref,
@@ -109,23 +116,98 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
 
   return (
     <div className="relative w-full h-full">
+      {/* ── Panel de previews de IA (lado izquierdo) ─── */}
+      {iaPreviews && (
+        <div className={[
+          'absolute left-0 top-0 bottom-0 z-30 transition-all duration-300',
+          showPreviews ? 'w-80' : 'w-12',
+        ].join(' ')}>
+          {/* Toggle button */}
+          <button
+            type="button"
+            onClick={onTogglePreviews}
+            className={[
+              'absolute top-4 h-10 w-10 rounded-r-lg flex items-center justify-center',
+              'bg-slate-800 border border-l-0 border-slate-600',
+              'text-white hover:bg-slate-700 transition-colors',
+              showPreviews ? 'left-80 -translate-x-full' : 'left-0',
+            ].join(' ')}
+            title={showPreviews ? 'Ocultar previews' : 'Ver previews IA'}
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d={showPreviews ? "M15 19l-7-7 7-7" : "M9 5l7 7-7 7"} />
+            </svg>
+          </button>
+
+          {/* Contenido del panel */}
+          <div className={[
+            'h-full bg-slate-950/95 border-r border-slate-700 overflow-y-auto',
+            showPreviews ? 'block' : 'hidden',
+          ].join(' ')}>
+            <div className="p-4 space-y-4">
+              <h3 className="text-sm font-semibold text-white">Previews IA</h3>
+
+              {iaPreviews.plano_2d && (
+                <div className="space-y-1">
+                  <p className="text-xs text-slate-400">Plano 2D</p>
+                  <img
+                    src={iaPreviews.plano_2d}
+                    alt="Plano 2D"
+                    className="w-full rounded-lg border border-slate-700"
+                  />
+                </div>
+              )}
+
+              {iaPreviews.exterior_1 && (
+                <div className="space-y-1">
+                  <p className="text-xs text-slate-400">Vista frente</p>
+                  <img
+                    src={iaPreviews.exterior_1}
+                    alt="Vista frente"
+                    className="w-full rounded-lg border border-slate-700"
+                  />
+                </div>
+              )}
+
+              {iaPreviews.exterior_2 && (
+                <div className="space-y-1">
+                  <p className="text-xs text-slate-400">Vista lateral</p>
+                  <img
+                    src={iaPreviews.exterior_2}
+                    alt="Vista lateral"
+                    className="w-full rounded-lg border border-slate-700"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Canvas principal ──────────────────────────────────────────── */}
       <div
         ref={canvasDivRef}
-        className="absolute inset-0"
+        className={[
+          'absolute inset-0 transition-all duration-300',
+          iaPreviews && showPreviews ? 'left-80' : 'left-0',
+        ].join(' ')}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        <CanvasBoard
-          ref={canvasRef}
-          datosVectoriales={datosVectoriales}
-          onChange={onChange}
-          isDark={isDark}
-          exportTitulo={exportTitulo}
-          exportSubtitulo={exportSubtitulo}
-          exportUbicacion={exportUbicacion}
-          exportDescripcion={exportDescripcion}
-        />
+<CanvasBoard
+            ref={canvasRef}
+            datosVectoriales={datosVectoriales}
+            onChange={onChange}
+            isDark={isDark}
+            exportTitulo={exportTitulo}
+            exportSubtitulo={exportSubtitulo}
+            exportUbicacion={exportUbicacion}
+            exportDescripcion={exportDescripcion}
+            onUndoChange={(can) => setCanUndoState(can)}
+            onRedoChange={(can) => setCanRedoState(can)}
+            onZoomChange={(z) => setZoomLevelState(z)}
+          />
       </div>
 
       {/* ── Panel de elementos — lado derecho ────────────────────────── */}
@@ -142,9 +224,17 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
             onSave={onSave}
             onExportJpg={() => canvasRef.current?.exportarJpg?.()}
             onExportPdf={() => canvasRef.current?.exportarPdf?.()}
+            onZoomIn={() => canvasRef.current?.zoomIn?.()}
+            onZoomOut={() => canvasRef.current?.zoomOut?.()}
+            onZoomFit={() => canvasRef.current?.zoomToFit?.()}
+            onUndo={() => canvasRef.current?.undo?.()}
+            onRedo={() => canvasRef.current?.redo?.()}
             saving={saving}
             isDark={isDark}
             onToggleTheme={onToggleTheme}
+            canUndo={canUndoState}
+            canRedo={canRedoState}
+            zoomLevel={zoomLevelState}
           />
         </div>
       </div>

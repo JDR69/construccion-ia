@@ -1,6 +1,9 @@
-from rest_framework import permissions, viewsets
+from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 from .models import AuditoriaPresupuesto, Presupuesto, PresupuestoItem
+from .services.estimacion_service import generar_items_presupuesto
 from .serializers import (
     AuditoriaPresupuestoSerializer,
     PresupuestoItemSerializer,
@@ -20,6 +23,72 @@ class PresupuestoViewSet(viewsets.ModelViewSet):
         if proyecto_id:
             qs = qs.filter(proyecto_id=proyecto_id)
         return qs
+
+    @action(detail=True, methods=["post"], url_path="generar-automatico")
+    def generar_automatico(self, request, pk=None):
+        presupuesto = self.get_object()
+        modo = str(request.data.get("modo") or "rapido").strip().lower()
+        if modo not in {"rapido", "refinado", "hibrido"}:
+            return Response(
+                {"detail": "El campo 'modo' debe ser: rapido, refinado o hibrido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if modo == "hibrido":
+            rapido = generar_items_presupuesto(presupuesto, modo="rapido", limpiar_existente=True)
+            refinado = generar_items_presupuesto(presupuesto, modo="refinado", limpiar_existente=True)
+            resumen = {
+                "modo": "hibrido",
+                "rapido": rapido,
+                "refinado": refinado,
+            }
+        else:
+            resumen = generar_items_presupuesto(presupuesto, modo=modo, limpiar_existente=True)
+
+        AuditoriaPresupuesto.objects.create(
+            presupuesto=presupuesto,
+            usuario=request.user,
+            accion="generar_automatico",
+            payload=resumen,
+        )
+
+        payload = {
+            "presupuesto": self.get_serializer(presupuesto).data,
+            "items": PresupuestoItemSerializer(presupuesto.items.all(), many=True).data,
+            "resumen": resumen,
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="refinar-desde-plano")
+    def refinar_desde_plano(self, request, pk=None):
+        presupuesto = self.get_object()
+        resumen = generar_items_presupuesto(presupuesto, modo="refinado", limpiar_existente=True)
+
+        AuditoriaPresupuesto.objects.create(
+            presupuesto=presupuesto,
+            usuario=request.user,
+            accion="refinar_desde_plano",
+            payload=resumen,
+        )
+
+        payload = {
+            "presupuesto": self.get_serializer(presupuesto).data,
+            "items": PresupuestoItemSerializer(presupuesto.items.all(), many=True).data,
+            "resumen": resumen,
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="total")
+    def total(self, request, pk=None):
+        presupuesto = self.get_object()
+        return Response(
+            {
+                "id": presupuesto.id,
+                "total": presupuesto.total,
+                "total_items": presupuesto.total_items,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class PresupuestoItemViewSet(viewsets.ModelViewSet):

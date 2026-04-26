@@ -34,6 +34,126 @@ SYSTEM_PROMPT = (
 
 _ALLOWED_TIPOS = {"muro", "puerta", "ventana"}
 
+_ESTILOS_VALIDOS = {
+    "contemporaneo",
+    "moderno",
+    "colonial",
+    "cabana",
+    "artesano",
+    "costero",
+    "casa de campo",
+}
+_TECHO_VALIDO = {"techo plano", "techo inclinado", "techo a dos aguas", "techo a cuatro aguas"}
+_CIMIENTOS_VALIDOS = {"losa", "sotano"}
+_COCINA_VALIDA = {"abierta", "cerrada"}
+_ESPACIOS_EXTERIORES_VALIDOS = {
+    "porche delantero",
+    "patio cubierto",
+    "terraza",
+    "balcon",
+    "patio",
+    "pasillo cubierto",
+    "cocina exterior",
+}
+
+
+def _coerce_positive_int(value: Any) -> Optional[int]:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def _sanitize_generation_options(opciones: Any) -> Dict[str, Any]:
+    """Filtra opciones permitidas para evitar ruido en el prompt."""
+    if not isinstance(opciones, dict):
+        return {}
+
+    salida: Dict[str, Any] = {}
+
+    estilo = str(opciones.get("estilo") or "").strip().lower()
+    if estilo in _ESTILOS_VALIDOS:
+        salida["estilo"] = estilo
+
+    area_m2 = _coerce_positive_int(opciones.get("area_m2"))
+    if area_m2:
+        salida["area_m2"] = area_m2
+
+    pisos = _coerce_positive_int(opciones.get("pisos"))
+    if pisos:
+        salida["pisos"] = pisos
+
+    dormitorios = _coerce_positive_int(opciones.get("dormitorios"))
+    if dormitorios is not None:
+        salida["dormitorios"] = dormitorios
+
+    banos = _coerce_positive_int(opciones.get("banos"))
+    if banos is not None:
+        salida["banos"] = banos
+
+    garaje = _coerce_positive_int(opciones.get("garaje"))
+    if garaje is not None:
+        salida["garaje"] = garaje
+
+    tipo_techo = str(opciones.get("tipo_techo") or "").strip().lower()
+    if tipo_techo in _TECHO_VALIDO:
+        salida["tipo_techo"] = tipo_techo
+
+    cimientos = str(opciones.get("cimientos") or "").strip().lower()
+    if cimientos in _CIMIENTOS_VALIDOS:
+        salida["cimientos"] = cimientos
+
+    cocina = str(opciones.get("cocina") or "").strip().lower()
+    if cocina in _COCINA_VALIDA:
+        salida["cocina"] = cocina
+
+    espacios = opciones.get("espacios_exteriores")
+    if isinstance(espacios, list):
+        limpios = [
+            str(item).strip().lower()
+            for item in espacios
+            if str(item).strip().lower() in _ESPACIOS_EXTERIORES_VALIDOS
+        ]
+        if limpios:
+            salida["espacios_exteriores"] = limpios
+
+    return salida
+
+
+def construir_prompt_dinamico(*, modo: str, prompt_usuario: str = "", opciones: Optional[Dict[str, Any]] = None) -> str:
+    """Construye un prompt estable para imagen o texto."""
+    modo = str(modo or "image").strip().lower()
+    limpio = _sanitize_generation_options(opciones or {})
+
+    if modo == "text":
+        base = (
+            "Eres un arquitecto/delineante experto. Genera un plano 2D desde cero y devuelve SOLO un array JSON "
+            "válido con elementos de tipo muro, puerta o ventana. "
+            "Sistema de coordenadas: origen (0,0) arriba a la izquierda, x a la derecha, y hacia abajo. "
+            "Usa dimensiones coherentes para una vivienda residencial y prioriza circulación realista. "
+            "Formato obligatorio por elemento: {id,tipo,x,y,width,height}. "
+            "No uses x1/y1/x2/y2, no uses polilíneas, no uses campos fuera del esquema. "
+            "Ejemplo válido: [{\"id\":\"m1\",\"tipo\":\"muro\",\"x\":10,\"y\":20,\"width\":320,\"height\":15}]."
+        )
+    else:
+        base = SYSTEM_PROMPT
+
+    lineas_extra: list[str] = []
+    if limpio:
+        lineas_extra.append("Preferencias guiadas:")
+        for key, value in limpio.items():
+            lineas_extra.append(f"- {key}: {value}")
+    if prompt_usuario:
+        lineas_extra.append(f"Indicaciones del usuario: {prompt_usuario.strip()}")
+
+    lineas_extra.append(
+        "Instrucción final: devuelve SOLO un array JSON válido (sin markdown, sin texto adicional, sin comas finales)."
+    )
+    return f"{base}\n\n" + "\n".join(lineas_extra)
+
 
 def _extract_code_fence_payload(s: str) -> Optional[str]:
     # Busca el primer bloque ```...``` y devuelve su contenido.
@@ -211,15 +331,20 @@ def _select_gemini_model_name(genai, *, prefer_strong: bool) -> str:
     return "models/gemini-2.0-flash" if not prefer_strong else "models/gemini-pro-latest"
 
 
-def _generate_with_model(*, model, image_pil) -> str:
+def _generate_with_model(*, model, image_pil=None, prompt_dinamico: str = "") -> str:
+    contenido: List[Any] = [
+        (
+            prompt_dinamico.strip()
+            or "Devuelve SOLO un array JSON válido (sin markdown). No uses comas finales. "
+            "Cierra el array con ']'. Usa números para x/y/width/height. "
+            "Si no detectas nada, devuelve [] (array vacío)."
+        )
+    ]
+    if image_pil is not None:
+        contenido.append(image_pil)
+
     resp = model.generate_content(
-        [
-            "Devuelve SOLO un array JSON válido (sin markdown). "
-            "No uses comas finales. Cierra el array con ']'. "
-            "Usa números para x/y/width/height. "
-            "Si no detectas nada, devuelve [] (array vacío).",
-            image_pil,
-        ],
+        contenido,
         generation_config={
             "temperature": 0.0,
             "top_p": 0.1,
@@ -318,6 +443,14 @@ def _coerce_number(v: Any) -> Optional[float]:
         return None
 
 
+def _pick_number(item: dict, *keys: str) -> Optional[float]:
+    for key in keys:
+        val = _coerce_number(item.get(key))
+        if val is not None:
+            return val
+    return None
+
+
 def _sanitize_vector_item(item: Any, idx: int) -> Dict[str, Any]:
     if not isinstance(item, dict):
         raise GeminiServiceError(f"Elemento #{idx + 1} no es un objeto JSON")
@@ -333,9 +466,31 @@ def _sanitize_vector_item(item: Any, idx: int) -> Dict[str, Any]:
         "tipo": tipo,
     }
 
-    # Coordenadas base
-    x = _coerce_number(item.get("x"))
-    y = _coerce_number(item.get("y"))
+    # Coordenadas base (tolerante para salidas de IA con alias)
+    x1 = _pick_number(item, "x1", "inicio_x", "start_x")
+    y1 = _pick_number(item, "y1", "inicio_y", "start_y")
+    x2 = _pick_number(item, "x2", "fin_x", "end_x")
+    y2 = _pick_number(item, "y2", "fin_y", "end_y")
+
+    x = _pick_number(item, "x", "left", "izquierda")
+    y = _pick_number(item, "y", "top", "arriba")
+
+    # Si no viene x/y, intentamos derivar desde x1/y1/x2/y2.
+    if x is None and x1 is not None and x2 is not None:
+        x = min(x1, x2)
+    if y is None and y1 is not None and y2 is not None:
+        y = min(y1, y2)
+
+    # Soporte para centros (centro_x/centro_y + width/height o ancho/alto)
+    if x is None or y is None:
+        cx = _pick_number(item, "centro_x", "center_x", "cx")
+        cy = _pick_number(item, "centro_y", "center_y", "cy")
+        ww = _pick_number(item, "width", "ancho")
+        hh = _pick_number(item, "height", "alto", "grosor")
+        if cx is not None and cy is not None and ww is not None and hh is not None:
+            x = cx - (ww / 2.0)
+            y = cy - (hh / 2.0)
+
     if x is None or y is None:
         raise GeminiServiceError(f"Elemento #{idx + 1}: faltan 'x'/'y' numéricos")
     out["x"] = x
@@ -347,8 +502,20 @@ def _sanitize_vector_item(item: Any, idx: int) -> Dict[str, Any]:
         grosor = _coerce_number(item.get("grosor"))
         orientacion = str(item.get("orientacion") or "").strip().lower()
 
-        width = _coerce_number(item.get("width"))
-        height = _coerce_number(item.get("height"))
+        width = _pick_number(item, "width", "ancho")
+        height = _pick_number(item, "height", "alto")
+
+        # Si viene como segmento (x1,y1)->(x2,y2), lo convertimos a rectángulo.
+        if width is None and height is None and None not in (x1, y1, x2, y2):
+            dx = abs(x2 - x1)
+            dy = abs(y2 - y1)
+            grosor_default = _pick_number(item, "grosor", "thickness") or 15.0
+            if dx >= dy:
+                width = dx if dx > 0 else grosor_default
+                height = grosor_default if dy == 0 else dy
+            else:
+                width = grosor_default if dx == 0 else dx
+                height = dy if dy > 0 else grosor_default
 
         if width is not None and height is not None:
             out["width"] = width
@@ -366,10 +533,10 @@ def _sanitize_vector_item(item: Any, idx: int) -> Dict[str, Any]:
 
     else:
         # puerta/ventana: usamos ancho (y opcional alto) o width/height
-        width = _coerce_number(item.get("width"))
-        height = _coerce_number(item.get("height"))
-        ancho = _coerce_number(item.get("ancho"))
-        alto = _coerce_number(item.get("alto"))
+        width = _pick_number(item, "width", "ancho")
+        height = _pick_number(item, "height", "alto")
+        ancho = _pick_number(item, "ancho", "width")
+        alto = _pick_number(item, "alto", "height")
 
         if width is not None and height is not None:
             out["width"] = width
@@ -403,7 +570,13 @@ def _validate_vector_data(data: Any) -> List[Dict[str, Any]]:
     return sanitized
 
 
-def procesar_plano_con_gemini(*, image_pil) -> GeminiParseResult:
+def procesar_plano_con_gemini(
+    *,
+    image_pil=None,
+    prompt_usuario: str = "",
+    opciones: Optional[Dict[str, Any]] = None,
+    modo: str = "image",
+) -> GeminiParseResult:
     """Llama a Gemini multimodal y devuelve datos vectoriales como array JSON validado."""
     api_key = getattr(settings, "GEMINI_API_KEY", "")
     if not api_key:
@@ -420,15 +593,27 @@ def procesar_plano_con_gemini(*, image_pil) -> GeminiParseResult:
 
     genai.configure(api_key=api_key)
 
+    modo = str(modo or "image").strip().lower()
+    if modo not in {"image", "text", "hybrid"}:
+        modo = "image"
+    if modo in {"image", "hybrid"} and image_pil is None:
+        raise GeminiServiceError("Debes enviar una imagen para modo image/hybrid.")
+
+    prompt_dinamico = construir_prompt_dinamico(
+        modo=modo,
+        prompt_usuario=prompt_usuario,
+        opciones=opciones,
+    )
+
     # Por defecto usamos modelo rápido (Flash). Si se desea un modelo más fuerte,
     # configurar GEMINI_MODEL o GEMINI_MODEL_STRONG.
     model_name = _select_gemini_model_name(genai, prefer_strong=False)
     raw = ""
 
     try:
-        model = genai.GenerativeModel(model_name, system_instruction=SYSTEM_PROMPT)
+        model = genai.GenerativeModel(model_name)
 
-        raw = _generate_with_model(model=model, image_pil=image_pil)
+        raw = _generate_with_model(model=model, image_pil=image_pil, prompt_dinamico=prompt_dinamico)
         parsed = _extract_json_array(raw)
         vector_data = _validate_vector_data(parsed)
         return GeminiParseResult(vector_data=vector_data, raw_text=raw)
@@ -449,10 +634,12 @@ def procesar_plano_con_gemini(*, image_pil) -> GeminiParseResult:
             try:
                 strong_name = _select_gemini_model_name(genai, prefer_strong=True)
                 if strong_name != model_name:
-                    strong_model = genai.GenerativeModel(
-                        strong_name, system_instruction=SYSTEM_PROMPT
+                    strong_model = genai.GenerativeModel(strong_name)
+                    raw2 = _generate_with_model(
+                        model=strong_model,
+                        image_pil=image_pil,
+                        prompt_dinamico=prompt_dinamico,
                     )
-                    raw2 = _generate_with_model(model=strong_model, image_pil=image_pil)
                     parsed2 = _extract_json_array(raw2)
                     vector_data2 = _validate_vector_data(parsed2)
                     return GeminiParseResult(vector_data=vector_data2, raw_text=raw2)

@@ -424,7 +424,18 @@ function crearCanvasPlanoProfesional({ stage, shapes, titulo, subtitulo, ubicaci
 }
 
 export const CanvasBoard = forwardRef(function CanvasBoard(
-  { datosVectoriales, onChange, isDark, exportTitulo, exportSubtitulo, exportUbicacion, exportDescripcion },
+  { 
+    datosVectoriales, 
+    onChange, 
+    isDark, 
+    exportTitulo, 
+    exportSubtitulo, 
+    exportUbicacion, 
+    exportDescripcion,
+    onUndoChange,
+    onRedoChange,
+    onZoomChange,
+  },
   ref,
 ) {
   const containerRef = useRef(null)
@@ -508,6 +519,19 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
       onChange?.(history[nextStep])
     }
   }, [history, historyStep, onChange])
+
+  // Notificar al parent cambios de undo/redo/zoom
+  useEffect(() => {
+    onUndoChange?.(historyStep > 0)
+  }, [historyStep, onUndoChange])
+
+  useEffect(() => {
+    onRedoChange?.(historyStep < history.length - 1)
+  }, [historyStep, history.length, onRedoChange])
+
+  useEffect(() => {
+    onZoomChange?.(`${(stageScale * 100).toFixed(0)}%`)
+  }, [stageScale, onZoomChange])
 
   const selectedShape = useMemo(
     () => (selectedId ? shapes.find((s) => s.id === selectedId) : null),
@@ -667,21 +691,45 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     pdf.save(`${name}.pdf`)
   }
 
-  useImperativeHandle(ref, () => ({ exportarJpg, exportarPdf, zoomToFit }), [shapes, exportTitulo, exportSubtitulo])
+  useImperativeHandle(ref, () => ({ 
+    exportarJpg, 
+    exportarPdf, 
+    zoomToFit,
+    zoomIn: () => setStageScale(s => Math.min(s * 1.2, 3)),
+    zoomOut: () => setStageScale(s => Math.max(s / 1.2, 0.2)),
+    getZoomLevel: () => `${(stageScale * 100).toFixed(0)}%`,
+    undo,
+    redo,
+    canUndo: historyStep > 0,
+    canRedo: historyStep < history.length - 1,
+  }), [stageScale, historyStep, history.length])
 
   const grid = useMemo(() => {
-    const spacing = 40
+    const spacing = 50
     const lines = []
 
+    // Grid fino (cada 50px)
     for (let x = 0; x <= size.width; x += spacing) {
-      lines.push({ points: [x, 0, x, size.height] })
+      lines.push({ points: [x, 0, x, size.height], major: false })
     }
     for (let y = 0; y <= size.height; y += spacing) {
-      lines.push({ points: [0, y, size.width, y] })
+      lines.push({ points: [0, y, size.width, y], major: false })
+    }
+
+    // Grid principal cada metro (100px)
+    for (let x = 0; x <= size.width; x += spacing * 2) {
+      lines.push({ points: [x, 0, x, size.height], major: true })
+    }
+    for (let y = 0; y <= size.height; y += spacing * 2) {
+      lines.push({ points: [0, y, size.width, y], major: true })
     }
 
     return lines
   }, [size.height, size.width])
+
+  // Color del grid - muy sutil para tema técnico
+  const gridColor = isDark ? '#1e293b' : '#e5e5e5'
+  const gridColorMajor = isDark ? '#334155' : '#cccccc'
 
   // ── Teclado: Navegación, Eliminar y Deshacer/Rehacer ──────────
   useEffect(() => {
@@ -1043,58 +1091,79 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
       return { fill, opacity }
     }
 
-    if (tipo === 'muro') {
-      return isDark
-        ? { fill: '#FFFFFF', opacity: 0.95 }
-        : { fill: '#0F172A', opacity: 0.92 }
-    }
-    if (tipo === 'puerta') {
-      // Gris — neutro para que el símbolo del arco sea protagonista
-      return isDark
-        ? { fill: '#64748B', opacity: 0.55 }   // slate-500
-        : { fill: '#94A3B8', opacity: 0.45 }   // slate-400
-    }
-    if (tipo === 'ventana') {
-      // Fill casi-invisible (transparent bloquea los hits en Konva)
-      return { fill: 'rgba(0,0,0,0.001)', opacity: 1 }
+    // Tema claro profesional (plano arquitectónico real)
+    if (!isDark) {
+      if (tipo === 'muro') {
+        return { fill: '#222222', opacity: 1 }  // Negro técnico
+      }
+      if (tipo === 'puerta') {
+        return { fill: '#555555', opacity: 0.9 }   // Gris oscuro técnico
+      }
+      if (tipo === 'ventana') {
+        return { fill: '#333333', opacity: 0.9 }   // Gris medio técnico
+      }
+      return { fill: '#333333', opacity: 0.85 }
     }
 
-    return isDark
-      ? { fill: '#38BDF8', opacity: 0.9 }
-      : { fill: '#1E293B', opacity: 0.75 }
+    // Tema oscuro - mejorado técnico
+    if (tipo === 'muro') {
+      return { fill: '#DDDDDD', opacity: 0.95 }  // Blanco técnico
+    }
+    if (tipo === 'puerta') {
+      return { fill: '#94A3B8', opacity: 0.7 }
+    }
+    if (tipo === 'ventana') {
+      return { fill: 'transparent', opacity: 1 }
+    }
+
+    return { fill: '#60A5FA', opacity: 0.9 }  // Azul suave técnico
+  }
+
+  // Color del stroke para muros (líneas)
+  const strokeColor = isDark ? '#EEEEEE' : '#111111'
+  const strokeWidthBase = isDark ? 1.2 : 1.5
+
+  // Colores para exportaciones (tema claro)
+  const colorPorTipoExportClaro = (tipo) => {
+    if (tipo === 'muro') return '#1a1a1a'
+    if (tipo === 'puerta') return '#8b5a2b'
+    if (tipo === 'ventana') return '#333333'
+    return '#333333'
   }
 
   return (
-    <div ref={containerRef} className="relative h-full w-full bg-white dark:bg-[#0F172A]">
+    <div ref={containerRef} className="relative h-full w-full bg-slate-50 dark:bg-[#0F172A]">
+      {/* ── Info del plano (esquina superior) ── */}
+      <div className="absolute top-3 left-3 z-10">
+        <div className="text-xs text-slate-400 dark:text-slate-500 font-mono">
+          {exportTitulo || 'Plano sin título'}
+        </div>
+        <div className="text-[10px] text-slate-300 dark:text-slate-600 font-mono">
+          1m = 100px | Escala 1:100
+        </div>
+      </div>
+
       {/* ── Widget de control (rotación + eliminar) para elemento seleccionado ── */}
       {selectedShape ? (
-        <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
-          {/* Panel de Propiedades: solo rect */}
+        <div className="absolute left-3 top-20 z-10 flex items-center gap-2">
+          {/* Panel de Propiedades profesional */}
           {isTipoRect(selectedShape.tipo) && (
-            <div className="rounded-xl border border-slate-700 bg-slate-950/95 text-white px-3 py-2 backdrop-blur flex items-center gap-4 shadow-xl">
-              <div className="flex flex-col">
-                <span className="text-[10px] text-slate-400 mb-1">Rotación</span>
-                <select
-                  className="h-8 rounded-lg bg-slate-900 border border-slate-700 px-2 text-sm w-20 focus:outline-none focus:border-sky-500"
-                  value={snapGrados(Number(selectedShape.rotation) || 0)}
-                  onChange={(e) => aplicarRotacionSeleccion(e.target.value)}
-                >
-                  {ROTACION_SNAPS.map((deg) => (
-                    <option key={deg} value={deg}>{deg}°</option>
-                  ))}
-                </select>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 text-slate-700 dark:text-slate-200 px-3 py-2 shadow-lg flex items-center gap-3 backdrop-blur">
+              {/* Tipo badge */}
+              <div className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-xs font-bold uppercase tracking-wider">
+                {selectedShape.tipo}
               </div>
 
-              <div className="w-px h-8 bg-slate-700"></div>
+              <div className="w-px h-6 bg-slate-200 dark:bg-slate-700"></div>
 
-              <div className="flex flex-col">
-                <span className="text-[10px] text-slate-400 mb-1">Longitud (m)</span>
+              {/* Longitud */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-slate-400">L:</span>
                 <input
                   type="number"
                   step="0.05"
-                  min="0.1"
-                  className="h-8 rounded-lg bg-slate-900 border border-slate-700 px-2 text-sm w-20 focus:outline-none focus:border-sky-500"
-                  value={aMetros(Math.max(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0))}
+                  className="w-16 h-7 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 text-xs font-mono focus:outline-none focus:border-blue-500"
+                  value={aMetros(Math.max(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0)).toFixed(2)}
                   onChange={(e) => {
                     const valM = parseFloat(e.target.value)
                     if (isNaN(valM) || valM <= 0) return
@@ -1104,19 +1173,19 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                     actualizarForma(selectedShape.id, patch)
                   }}
                 />
+                <span className="text-[10px] text-slate-400">m</span>
               </div>
 
+              {/* Grosor */}
               {tieneEspesorFijo(selectedShape.tipo) && (
                 <>
-                  <div className="w-px h-8 bg-slate-700"></div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-400 mb-1">Grosor (m)</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400">e:</span>
                     <input
                       type="number"
                       step="0.01"
-                      min="0.05"
-                      className="h-8 rounded-lg bg-slate-900 border border-slate-700 px-2 text-sm w-20 focus:outline-none focus:border-sky-500"
-                      value={aMetros(Math.min(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0))}
+                      className="w-14 h-7 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 text-xs font-mono focus:outline-none focus:border-blue-500"
+                      value={aMetros(Math.min(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0)).toFixed(2)}
                       onChange={(e) => {
                         const valM = parseFloat(e.target.value)
                         if (isNaN(valM) || valM <= 0) return
@@ -1126,35 +1195,39 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                         actualizarForma(selectedShape.id, patch)
                       }}
                     />
+                    <span className="text-[10px] text-slate-400">m</span>
+                  </div>
+
+                  {/* Rotación */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400">α:</span>
+                    <select
+                      className="h-7 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-1 text-xs font-mono focus:outline-none focus:border-blue-500"
+                      value={snapGrados(Number(selectedShape.rotation) || 0)}
+                      onChange={(e) => aplicarRotacionSeleccion(e.target.value)}
+                    >
+                      {ROTACION_SNAPS.map((deg) => (
+                        <option key={deg} value={deg}>{deg}°</option>
+                      ))}
+                    </select>
                   </div>
                 </>
               )}
-            </div>
+
+              <div className="w-px h-6 bg-slate-200 dark:bg-slate-700"></div>
+
+              {/* Botón eliminar */}
+              <button
+                onClick={eliminarSeleccionado}
+                title="Eliminar"
+                className="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 hover:text-red-600 transition-colors"
+              >
+                <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                  <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 18h4.807a2.75 2.75 0 002.741-2.053l-.841-10.519.149.023A.75.75 0 0014.12 4.693V3.75A2.75 2.75 0 0011.25 1h1.5zm-.5 5.245c0-.27.022-.537.063-.8l.841 10.519a.25.25 0 01-.232.188H7.596a.25.25 0 01-.232-.188l.841-10.519c.041-.263.063-.53.063-.8z" clipRule="evenodd" />
+                </svg>
+              </button>
+</div>
           )}
-          {/* Tipo label para no-rect */}
-          {!isTipoRect(selectedShape.tipo) && (
-            <div className="rounded-lg border border-slate-700 bg-slate-950/95 text-slate-300 px-3 py-1.5 text-xs backdrop-blur">
-              {selectedShape.tipo === 'texto' || selectedShape.tipo === 'cota'
-                ? 'Doble clic para editar · Arrastra para mover'
-                : selectedShape.tipo}
-            </div>
-          )}
-          {/* Botón eliminar */}
-          <button
-            onClick={eliminarSeleccionado}
-            title="Eliminar (Delete)"
-            className="
-              flex items-center justify-center w-9 h-9 rounded-xl
-              border border-red-800 bg-red-950/90 text-red-400
-              hover:bg-red-600 hover:text-white hover:border-red-500
-              transition-colors backdrop-blur
-            "
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-4 h-4">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-                d="M7.5 6.75h9m-6.75 0v-1.5h4.5v1.5m-7.5 0l.9 13.5h6.2l.9-13.5" />
-            </svg>
-          </button>
         </div>
       ) : null}
 
@@ -1249,7 +1322,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
             y={-stagePos.y / stageScale}
             width={size.width / stageScale}
             height={size.height / stageScale}
-            fill={modoExport ? '#FFFFFF' : isDark ? '#0F172A' : '#FFFFFF'}
+            fill={modoExport ? '#FFFFFF' : isDark ? '#0f172a' : '#fafafa'}
           />
 
           {modoExport
@@ -1258,9 +1331,9 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
               <Line
                 key={idx}
                 points={l.points}
-                stroke={isDark ? '#1E293B' : '#E2E8F0'}
-                strokeWidth={1}
-                opacity={0.7}
+                stroke={l.major ? gridColorMajor : gridColor}
+                strokeWidth={l.major ? 0.8 : 0.4}
+                opacity={l.major ? 0.5 : 0.3}
               />
             ))}
 

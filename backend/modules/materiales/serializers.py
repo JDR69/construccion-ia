@@ -12,6 +12,7 @@ class MaterialSerializer(serializers.ModelSerializer):
             "categoria",
             "unidad",
             "precio_referencial",
+            "precio_actualizado_en",
             "creado_en",
             "actualizado_en",
         ]

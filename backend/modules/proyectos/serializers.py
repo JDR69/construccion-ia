@@ -11,6 +11,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
             "idUsuario",
             "titulo",
             "descripcion",
+            "num_pisos",
             "fechaCreacion",
         ]
         read_only_fields = ["id", "idUsuario", "fechaCreacion"]

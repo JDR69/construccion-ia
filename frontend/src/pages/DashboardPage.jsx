@@ -10,6 +10,7 @@ import { useAuth }       from '../hooks/useAuth.jsx'
 import { useToast }      from '../hooks/useToast.jsx'
 import { useProyectos }  from '../hooks/useProyectos'
 import { getPresupuestoItems } from '../api/presupuestos'
+import { EstimacionModal } from '../modules/dashboard/EstimacionModal'
 import { ProyectoPreview }     from '../dashboard/ProyectoPreview'
 import { Button } from '../ui/Button'
 import { Input }  from '../ui/Input'
@@ -213,7 +214,7 @@ function StatCard({ icon: Icon, title, value, helper, accentColor }) {
 }
 
 /* ─── Componente: Tarjeta de proyecto ──────────────── */
-function ProjectCard({ proyecto, onPreview, onEdit, onDelete, onOpenEditor }) {
+function ProjectCard({ proyecto, onPreview, onEdit, onDelete, onOpenEditor, onOpenEstimacion }) {
   const status = toStatus(proyecto)
 
   /* Color de acento según el estado */
@@ -248,6 +249,7 @@ function ProjectCard({ proyecto, onPreview, onEdit, onDelete, onOpenEditor }) {
         <div className="mt-4 flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => onPreview(proyecto)}>Vista previa</Button>
           <Button size="sm" variant="secondary" onClick={() => onEdit(proyecto)}>Editar</Button>
+          <Button size="sm" variant="secondary" onClick={() => onOpenEstimacion(proyecto)}>Estimación</Button>
           <Button size="sm" onClick={() => onOpenEditor(proyecto)}>Abrir editor</Button>
           <Button size="sm" variant="danger"    onClick={() => onDelete(proyecto)}>Eliminar</Button>
         </div>
@@ -315,6 +317,7 @@ export function DashboardPage() {
   const [modalOpen,  setModalOpen]  = useState(false)
   const [editing,    setEditing]    = useState(null)
   const [previewing, setPreviewing] = useState(null)
+  const [estimacioning, setEstimacioning] = useState(null)
   const [titulo,     setTitulo]     = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [saving,     setSaving]     = useState(false)
@@ -385,6 +388,7 @@ export function DashboardPage() {
     setFormError(''); setModalOpen(true)
   }
   const openPreview = (p) => setPreviewing(p)
+  const openEstimacion = (p) => setEstimacioning(p)
 
   const onDelete = (p) => {
     if (!window.confirm(`¿Eliminar el proyecto "${p.titulo}"?`)) return
@@ -606,6 +610,7 @@ export function DashboardPage() {
                     onEdit={openEdit}
                     onDelete={onDelete}
                     onOpenEditor={openEditor}
+                    onOpenEstimacion={openEstimacion}
                   />
                 ))}
               </div>
@@ -676,6 +681,13 @@ export function DashboardPage() {
 
       {/* ── Preview de proyecto ── */}
       <ProyectoPreview proyecto={previewing} onClose={() => setPreviewing(null)} />
+
+      {/* ── Modal de estimación ── */}
+      <EstimacionModal
+        open={!!estimacioning}
+        onClose={() => setEstimacioning(null)}
+        proyecto={estimacioning}
+      />
 
       {/* ── Modal crear/editar proyecto ── */}
       <Modal

@@ -12,6 +12,10 @@ class PlanoSerializer(serializers.ModelSerializer):
             "nombre",
             "archivo",
             "datos_vectoriales",
+            "modo_generacion",
+            "prompt_usuario",
+            "opciones_generacion",
+            "escala_metros_por_pixel",
             "creado_en",
             "actualizado_en",
         ]
