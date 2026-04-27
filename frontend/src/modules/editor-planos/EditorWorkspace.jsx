@@ -25,6 +25,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     iaPreviews,      // Previews generados por IA
     showPreviews,    // Si el panel de previews esta visible
     onTogglePreviews, // Toggle del panel de previews
+    escalaMetrosPorPixel,
   },
   ref,
 ) {
@@ -66,14 +67,16 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
 
     const { tipo, payload = {} } = parsed
 
+    const metrosPorPixel = Number(escalaMetrosPorPixel)
+    const pxPorMetro = metrosPorPixel > 0 ? (1 / metrosPorPixel) : 100
+
     if (tipo === 'muro' || tipo === 'puerta' || tipo === 'ventana') {
       // addElemento crea el elemento con posición por defecto;
       // para que aparezca donde se soltó lo inyectamos directamente al array.
-      const PX_POR_METRO = 100
       const espesores   = { muro: 0.2, puerta: 0.15, ventana: 0.1 }
       const largos      = { muro: 1,   puerta: 0.9,  ventana: 1.2 }
-      const espesorPx   = (espesores[tipo] ?? 0.18) * PX_POR_METRO
-      const largoPx     = (largos[tipo]    ?? 1)    * PX_POR_METRO
+      const espesorPx   = (espesores[tipo] ?? 0.18) * pxPorMetro
+      const largoPx     = (largos[tipo]    ?? 1)    * pxPorMetro
       const nuevo = {
         id: Date.now(),
         tipo,
@@ -102,7 +105,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
       const newY2 = y
       // Calcular valor real en metros desde la distancia en px
       const distPx = Math.hypot(newX2 - newX1, newY2 - newY1)
-      const metros = distPx / 100  // PX_POR_METRO = 100
+      const metros = distPx * (metrosPorPixel > 0 ? metrosPorPixel : 0.01)
       const valorCalculado = `${metros.toFixed(2)} m`
       onAddCota?.(newX1, newY1, newX2, newY2, valorCalculado, payload.orientacion ?? 'horizontal')
       return
@@ -200,6 +203,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
             datosVectoriales={datosVectoriales}
             onChange={onChange}
             isDark={isDark}
+            escalaMetrosPorPixel={escalaMetrosPorPixel}
             exportTitulo={exportTitulo}
             exportSubtitulo={exportSubtitulo}
             exportUbicacion={exportUbicacion}

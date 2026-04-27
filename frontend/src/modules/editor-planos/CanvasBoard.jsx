@@ -1,16 +1,16 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Arc, Circle, Group, Layer, Line, Path, Rect, Stage, Text, Transformer } from 'react-konva'
 
-const PX_POR_METRO = 100
+const DEFAULT_METROS_POR_PIXEL = 0.01
 const ESPESOR_M = {
   muro: 0.2,
   puerta: 0.15,
   ventana: 0.1,
 }
 
-function espesorPxPorTipo(tipo) {
+function espesorPxPorTipo(tipo, pxPorMetro) {
   const m = ESPESOR_M[tipo]
-  return Number.isFinite(m) ? m * PX_POR_METRO : null
+  return Number.isFinite(m) ? m * pxPorMetro : null
 }
 
 function tieneEspesorFijo(tipo) {
@@ -43,6 +43,23 @@ function symbolPathByName(nombre) {
     ].join(' ')
   }
 
+  // Auto (vista superior simplificada): carrocería + techo + ruedas
+  if (key === 'auto' || key === 'carro' || key === 'coche') {
+    return [
+      'M10 44 H90 V58 H10 Z',
+      'M25 44 L35 28 H65 L75 44 Z',
+      'M25 58 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0',
+      'M75 58 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0',
+    ].join(' ')
+  }
+
+  // Escalera/Gradas: perfil en "L" con peldaños
+  if (key === 'escalera' || key === 'gradas' || key === 'escaleras') {
+    return [
+      'M12 60 H38 V50 H48 V40 H58 V30 H68 V20 H92 V12 H82 V18 H64 V28 H54 V38 H44 V48 H34 V60 H12 Z',
+    ].join(' ')
+  }
+
   return null
 }
 
@@ -58,6 +75,16 @@ function symbolColors(nombre, isDark) {
     return isDark
       ? { fill: '#1E3A3A', stroke: '#34D399', bg: 'rgba(52,211,153,0.10)' }
       : { fill: '#D1FAE5', stroke: '#059669', bg: 'rgba(5,150,105,0.10)' }
+  }
+  if (key === 'auto' || key === 'carro' || key === 'coche') {
+    return isDark
+      ? { fill: '#0B1220', stroke: '#F59E0B', bg: 'rgba(245,158,11,0.10)' }
+      : { fill: '#FEF3C7', stroke: '#B45309', bg: 'rgba(180,83,9,0.10)' }
+  }
+  if (key === 'escalera' || key === 'gradas' || key === 'escaleras') {
+    return isDark
+      ? { fill: '#111827', stroke: '#A78BFA', bg: 'rgba(167,139,250,0.10)' }
+      : { fill: '#EDE9FE', stroke: '#6D28D9', bg: 'rgba(109,40,217,0.10)' }
   }
   // fallback
   return isDark
@@ -97,9 +124,10 @@ function cotaTicks({ x1, y1, x2, y2, tick = 10 }) {
 }
 
 // Calcula el valor de la cota en metros a partir de las coordenadas en px
-function calcularValorCota(x1, y1, x2, y2) {
+function calcularValorCota(x1, y1, x2, y2, metrosPorPixel) {
   const distPx = Math.hypot(x2 - x1, y2 - y1)
-  const metros = distPx / PX_POR_METRO
+  const mpp = Number(metrosPorPixel) > 0 ? Number(metrosPorPixel) : DEFAULT_METROS_POR_PIXEL
+  const metros = distPx * mpp
   return `${metros.toFixed(2)} m`
 }
 
@@ -181,8 +209,9 @@ function clientRectDeNode(node) {
   }
 }
 
-function aMetros(px, pxPorMetro = PX_POR_METRO) {
-  const v = Number(px) / pxPorMetro
+function aMetros(px, metrosPorPixel = DEFAULT_METROS_POR_PIXEL) {
+  const mpp = Number(metrosPorPixel) > 0 ? Number(metrosPorPixel) : DEFAULT_METROS_POR_PIXEL
+  const v = Number(px) * mpp
   if (!Number.isFinite(v)) return 0
   return v
 }
@@ -241,14 +270,83 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
   return lines
 }
 
-function crearCanvasPlanoProfesional({ stage, shapes, titulo, subtitulo, ubicacion, descripcion }) {
-  const pixelRatio = 2
-  const baseCanvas = stage.toCanvas({ pixelRatio })
+function crearCanvasPlanoProfesional({ stage, shapes, titulo, subtitulo, ubicacion, descripcion, metrosPorPixel }) {
+  // PixelRatio dinámico: evita exports gigantes, pero mantiene detalle.
+  const targetMaxSide = 5200
+  const stageMax = Math.max(1, Number(stage?.width?.()) || 1, Number(stage?.height?.()) || 1)
+  const pr = Math.round(targetMaxSide / stageMax)
+  const pixelRatio = Math.max(2, Math.min(6, pr))
 
-  const margin = Math.round(28 * pixelRatio)
-  const titleH = Math.round(170 * pixelRatio)
-  const w = baseCanvas.width + margin * 2
-  const h = baseCanvas.height + margin * 2 + titleH
+  const stageW = Number(stage?.width?.()) || 1
+  const stageH = Number(stage?.height?.()) || 1
+
+  const baseFull = stage.toCanvas({ pixelRatio })
+
+  // Recorte al contenido (en coordenadas de canvas del Stage ya renderizado)
+  const scale = Number(stage?.scaleX?.()) || 1
+  const pos = stage?.position?.() || { x: 0, y: 0 }
+  const pad = 40
+
+  const pts = []
+  for (const s of (Array.isArray(shapes) ? shapes : [])) {
+    if (!s) continue
+    if (s.tipo === 'muro' || s.tipo === 'puerta' || s.tipo === 'ventana') {
+      const x = Number(s.x) || 0
+      const y = Number(s.y) || 0
+      const w = Number(s.width) || 0
+      const h = Number(s.height) || 0
+      if (w > 0 && h > 0) {
+        pts.push([x, y], [x + w, y + h])
+      }
+    } else if (s.tipo === 'cota') {
+      const x1 = Number(s.x1) || 0
+      const y1 = Number(s.y1) || 0
+      const x2 = Number(s.x2) || 0
+      const y2 = Number(s.y2) || 0
+      pts.push([x1, y1], [x2, y2])
+    } else if (s.tipo === 'texto') {
+      const x = Number(s.x) || 0
+      const y = Number(s.y) || 0
+      const fs = Number(s.tamano_fuente) || 16
+      const txt = String(s.texto || '')
+      const w = Math.max(60, txt.length * fs * 0.6 + 16)
+      const h = fs + 14
+      pts.push([x - 8, y - 6], [x - 8 + w, y - 6 + h])
+    } else if (s.tipo === 'simbolo') {
+      const x = Number(s.x) || 0
+      const y = Number(s.y) || 0
+      const sc = Number(s.escala) || 1
+      pts.push([x - 4, y - 4], [x - 4 + 108 * sc, y - 4 + 78 * sc])
+    }
+  }
+
+  let minX = 0, minY = 0, maxX = stageW, maxY = stageH
+  if (pts.length) {
+    const screen = pts.map(([x, y]) => [x * scale + pos.x, y * scale + pos.y])
+    minX = Math.max(0, Math.min(...screen.map(p => p[0])) - pad)
+    minY = Math.max(0, Math.min(...screen.map(p => p[1])) - pad)
+    maxX = Math.min(stageW, Math.max(...screen.map(p => p[0])) + pad)
+    maxY = Math.min(stageH, Math.max(...screen.map(p => p[1])) + pad)
+  }
+
+  const cropX = Math.floor(minX * pixelRatio)
+  const cropY = Math.floor(minY * pixelRatio)
+  const cropW = Math.max(1, Math.floor((maxX - minX) * pixelRatio))
+  const cropH = Math.max(1, Math.floor((maxY - minY) * pixelRatio))
+
+  const baseCanvas = document.createElement('canvas')
+  baseCanvas.width = cropW
+  baseCanvas.height = cropH
+  const bctx = baseCanvas.getContext('2d')
+  bctx.drawImage(baseFull, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+
+  const mpp = Number(metrosPorPixel) > 0 ? Number(metrosPorPixel) : DEFAULT_METROS_POR_PIXEL
+  const pxPorMetro = 1 / mpp
+
+  const margin = Math.round(24 * pixelRatio)
+  const panelW = Math.round(360 * pixelRatio)
+  const w = baseCanvas.width + margin * 2 + panelW
+  const h = baseCanvas.height + margin * 2
 
   const out = document.createElement('canvas')
   out.width = w
@@ -264,19 +362,27 @@ function crearCanvasPlanoProfesional({ stage, shapes, titulo, subtitulo, ubicaci
   ctx.lineWidth = 2 * pixelRatio
   ctx.strokeRect(margin, margin, w - margin * 2, h - margin * 2)
 
+  // Separador panel derecho
+  const panelX = margin + baseCanvas.width
+  ctx.strokeStyle = '#CBD5E1'
+  ctx.lineWidth = 1 * pixelRatio
+  ctx.beginPath()
+  ctx.moveTo(panelX, margin)
+  ctx.lineTo(panelX, h - margin)
+  ctx.stroke()
+
   // Plano (área de dibujo)
   const planoX = margin
   const planoY = margin
   ctx.drawImage(baseCanvas, planoX, planoY)
 
-  // Cajetín inferior
-  const cajX = margin
-  const cajY = margin + baseCanvas.height
-  const cajW = w - margin * 2
-  const cajH = titleH
+  // Panel derecho (cajetín)
+  const cajX = panelX
+  const cajY = margin
+  const cajW = panelW
+  const cajH = h - margin * 2
   ctx.fillStyle = '#F8FAFC'
   ctx.fillRect(cajX, cajY, cajW, cajH)
-
   ctx.strokeStyle = '#CBD5E1'
   ctx.lineWidth = 1 * pixelRatio
   ctx.strokeRect(cajX, cajY, cajW, cajH)
@@ -327,7 +433,7 @@ function crearCanvasPlanoProfesional({ stage, shapes, titulo, subtitulo, ubicaci
   ctx.fillText(`Fecha: ${fecha}`, px, py)
 
   py += line
-  ctx.fillText(`Escala: 1 m = ${PX_POR_METRO} px`, px, py)
+  ctx.fillText(`Escala: 1 m = ${Math.round(pxPorMetro)} px`, px, py)
 
   // Bounding box
   const rects = shapes
@@ -345,8 +451,8 @@ function crearCanvasPlanoProfesional({ stage, shapes, titulo, subtitulo, ubicaci
     const minY = Math.min(...rects.map((r) => r.y))
     const maxX = Math.max(...rects.map((r) => r.x + r.w))
     const maxY = Math.max(...rects.map((r) => r.y + r.h))
-    const anchoM = aMetros(maxX - minX).toFixed(2)
-    const altoM = aMetros(maxY - minY).toFixed(2)
+    const anchoM = aMetros(maxX - minX, mpp).toFixed(2)
+    const altoM = aMetros(maxY - minY, mpp).toFixed(2)
     py += line
     ctx.fillText(`Tamaño aprox.: ${anchoM} m x ${altoM} m`, px, py)
   }
@@ -361,9 +467,9 @@ function crearCanvasPlanoProfesional({ stage, shapes, titulo, subtitulo, ubicaci
     {}
   )
 
-  // Columna derecha: leyenda + conteo
-  const colX = cajX + cajW - Math.round(280 * pixelRatio)
-  let colY = cajY + Math.round(26 * pixelRatio)
+  // Leyenda + conteo (debajo de metadatos)
+  const colX = px
+  let colY = py + Math.round(28 * pixelRatio)
   font(10, 700)
   ctx.fillStyle = '#0F172A'
   ctx.fillText('Leyenda', colX, colY)
@@ -397,12 +503,12 @@ function crearCanvasPlanoProfesional({ stage, shapes, titulo, subtitulo, ubicaci
     colY += Math.round(14 * pixelRatio)
   })
 
-  // Barra de escala (abajo-izq)
+  // Barra de escala (abajo del panel)
   const barX = px
-  const barY = cajY + cajH - Math.round(24 * pixelRatio)
+  const barY = cajY + cajH - Math.round(30 * pixelRatio)
   const segmentM = 1
   const segments = 5
-  const segPx = PX_POR_METRO * pixelRatio * segmentM
+  const segPx = pxPorMetro * pixelRatio * segmentM
   ctx.strokeStyle = '#0F172A'
   ctx.lineWidth = 2 * pixelRatio
   ctx.beginPath()
@@ -428,6 +534,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     datosVectoriales, 
     onChange, 
     isDark, 
+    escalaMetrosPorPixel,
     exportTitulo, 
     exportSubtitulo, 
     exportUbicacion, 
@@ -462,6 +569,13 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
   const [idEnConflicto, setIdEnConflicto] = useState(null)
   const [modoExport, setModoExport] = useState(false)
   const [snapPos, setSnapPos] = useState(null)  // { x, y } del preview de snap
+
+  const metrosPorPixel = useMemo(() => {
+    const v = Number(escalaMetrosPorPixel)
+    return v > 0 ? v : DEFAULT_METROS_POR_PIXEL
+  }, [escalaMetrosPorPixel])
+
+  const pxPorMetro = useMemo(() => 1 / metrosPorPixel, [metrosPorPixel])
 
   useEffect(() => {
     const el = containerRef.current
@@ -615,6 +729,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
       subtitulo: exportSubtitulo || '',
       ubicacion: exportUbicacion || '',
       descripcion: exportDescripcion || '',
+      metrosPorPixel,
     })
 
     if (tr) {
@@ -632,7 +747,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
           resolve()
         },
         'image/jpeg',
-        0.95,
+        0.98,
       )
     })
   }
@@ -661,8 +776,10 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
       subtitulo: exportSubtitulo || '',
       ubicacion: exportUbicacion || '',
       descripcion: exportDescripcion || '',
+      metrosPorPixel,
     })
-    const imgData = canvas.toDataURL('image/jpeg', 0.95)
+    // PNG evita artefactos en líneas finas (más profesional)
+    const imgData = canvas.toDataURL('image/png')
 
     if (tr) {
       tr.visible(prevVisible)
@@ -672,7 +789,8 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     setModoExport(false)
 
     const { jsPDF } = await import('jspdf')
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+    // A3 para que entren detalles y textos con mejor legibilidad
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a3' })
     const pageW = pdf.internal.pageSize.getWidth()
     const pageH = pdf.internal.pageSize.getHeight()
 
@@ -685,7 +803,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     const x = (pageW - w) / 2
     const y = (pageH - h) / 2
 
-    pdf.addImage(imgData, 'JPEG', x, y, w, h)
+    pdf.addImage(imgData, 'PNG', x, y, w, h)
 
     const name = sanitizarNombreArchivo(exportTitulo || 'plano')
     pdf.save(`${name}.pdf`)
@@ -1139,7 +1257,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
           {exportTitulo || 'Plano sin título'}
         </div>
         <div className="text-[10px] text-slate-300 dark:text-slate-600 font-mono">
-          1m = 100px | Escala 1:100
+          1m = {Math.round(pxPorMetro)}px | m/px: {metrosPorPixel.toFixed(4)}
         </div>
       </div>
 
@@ -1163,11 +1281,11 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                   type="number"
                   step="0.05"
                   className="w-16 h-7 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 text-xs font-mono focus:outline-none focus:border-blue-500"
-                  value={aMetros(Math.max(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0)).toFixed(2)}
+                  value={aMetros(Math.max(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0), metrosPorPixel).toFixed(2)}
                   onChange={(e) => {
                     const valM = parseFloat(e.target.value)
                     if (isNaN(valM) || valM <= 0) return
-                    const valPx = valM * 100
+                    const valPx = valM * pxPorMetro
                     const isHoriz = (Number(selectedShape.width) || 0) >= (Number(selectedShape.height) || 0)
                     const patch = isHoriz ? { width: valPx } : { height: valPx }
                     actualizarForma(selectedShape.id, patch)
@@ -1185,11 +1303,11 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                       type="number"
                       step="0.01"
                       className="w-14 h-7 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 text-xs font-mono focus:outline-none focus:border-blue-500"
-                      value={aMetros(Math.min(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0)).toFixed(2)}
+                      value={aMetros(Math.min(Number(selectedShape.width) || 0, Number(selectedShape.height) || 0), metrosPorPixel).toFixed(2)}
                       onChange={(e) => {
                         const valM = parseFloat(e.target.value)
                         if (isNaN(valM) || valM <= 0) return
-                        const valPx = valM * 100
+                        const valPx = valM * pxPorMetro
                         const isHoriz = (Number(selectedShape.width) || 0) >= (Number(selectedShape.height) || 0)
                         const patch = isHoriz ? { height: valPx } : { width: valPx }
                         actualizarForma(selectedShape.id, patch)
@@ -1441,7 +1559,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                 const patch = { x: node.x(), y: node.y(), rotation }
                 
                 if (tieneEspesorFijo(s.tipo)) {
-                  const esp = espesorPxPorTipo(s.tipo)
+                  const esp = espesorPxPorTipo(s.tipo, pxPorMetro)
                   const isLocalHorizontal = (Number(s.width) || 0) >= (Number(s.height) || 0)
                   
                   if (isLocalHorizontal) {
@@ -1569,61 +1687,76 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
           })}
 
           {/* ── Etiquetas de medida para elementos rect ── */}
-          {shapes.filter((s) => isTipoRect(s.tipo)).map((s) => {
-            if (!selectedIds.includes(s.id)) return null;
-
+          {shapes.filter((s) => s.tipo === 'muro' || s.tipo === 'puerta').map((s) => {
+            const isSelected = selectedIds.includes(s.id)
             const w = Number(s.width) || 0
             const h = Number(s.height) || 0
-            const lengthPx = tieneEspesorFijo(s.tipo) ? Math.max(w, h) : Math.max(w, h)
-            const isLocalVertical = h > w;
+            const rot = Number(s.rotation) || 0
 
-            const m = aMetros(lengthPx)
+            const lengthPx = Math.max(w, h)
+            const isLocalVertical = h > w
+            const m = aMetros(lengthPx, metrosPorPixel)
             const label = `${m.toFixed(2)}m`
 
-            const baseX = Number(s.x) || 0;
-            const baseY = Number(s.y) || 0;
-            const rot = Number(s.rotation) || 0;
+            // Rotación del texto: alineado al lado largo
+            let textRotAbs = rot
+            if (isLocalVertical) textRotAbs += 90
+            while (textRotAbs > 90) textRotAbs -= 180
+            while (textRotAbs <= -90) textRotAbs += 180
+            const textRotRel = textRotAbs - rot
 
-            const rad = rot * Math.PI / 180;
-            const cx = baseX + (w / 2) * Math.cos(rad) - (h / 2) * Math.sin(rad);
-            const cy = baseY + (w / 2) * Math.sin(rad) + (h / 2) * Math.cos(rad);
+            // Offset perpendicular (local) para que no tape el elemento
+            const off = 14
+            const xOff = isLocalVertical ? -(w / 2 + off) : 0
+            const yOff = isLocalVertical ? 0 : -(h / 2 + off)
 
-            let textRot = rot;
-            if (isLocalVertical) {
-                textRot += 90; 
-            }
-            // Normalizar para que el texto nunca quede de cabeza
-            while (textRot > 90) textRot -= 180;
-            while (textRot <= -90) textRot += 180;
+            const bgFill = modoExport
+              ? 'rgba(255,255,255,0.96)'
+              : (isDark ? 'rgba(15,23,42,0.78)' : 'rgba(255,255,255,0.88)')
+            const border = modoExport
+              ? '#0F172A'
+              : (isSelected ? (isDark ? '#38BDF8' : '#0F172A') : (isDark ? 'rgba(56,189,248,0.35)' : 'rgba(15,23,42,0.25)'))
+            const textFill = modoExport
+              ? '#0F172A'
+              : (isSelected ? (isDark ? '#38BDF8' : '#0369A1') : (isDark ? '#93C5FD' : '#1E293B'))
 
             return (
-              <Group 
-                key={`${s.id}-measure`} 
-                x={cx} 
-                y={cy} 
-                rotation={textRot} 
+              <Group
+                key={`${s.id}-measure`}
+                x={Number(s.x) || 0}
+                y={Number(s.y) || 0}
+                rotation={rot}
                 listening={false}
               >
-                <Rect
-                  x={-22} y={-10}
-                  width={44} height={20}
-                  fill={isDark ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.9)"}
-                  cornerRadius={6}
-                  shadowColor="black"
-                  shadowBlur={4}
-                  shadowOpacity={0.15}
-                  shadowOffsetY={1}
-                />
-                <Text
-                  x={-22} y={-5.5}
-                  width={44}
-                  text={label}
-                  fontSize={11}
-                  fontFamily="Inter, sans-serif"
-                  fontWeight="700"
-                  align="center"
-                  fill={isDark ? '#38BDF8' : '#0369A1'}
-                />
+                <Group x={w / 2 + xOff} y={h / 2 + yOff} rotation={textRotRel}>
+                  <Rect
+                    x={-24}
+                    y={-10}
+                    width={48}
+                    height={20}
+                    fill={bgFill}
+                    stroke={border}
+                    strokeWidth={1}
+                    cornerRadius={6}
+                    shadowColor={modoExport ? 'transparent' : 'black'}
+                    shadowBlur={modoExport ? 0 : 4}
+                    shadowOpacity={modoExport ? 0 : 0.12}
+                    shadowOffsetY={modoExport ? 0 : 1}
+                    opacity={isSelected || modoExport ? 1 : 0.75}
+                  />
+                  <Text
+                    x={-24}
+                    y={-5.5}
+                    width={48}
+                    text={label}
+                    fontSize={11}
+                    fontFamily="Inter, ui-sans-serif, system-ui, sans-serif"
+                    fontStyle="bold"
+                    align="center"
+                    fill={textFill}
+                    opacity={isSelected || modoExport ? 1 : 0.85}
+                  />
+                </Group>
               </Group>
             )
           })}
@@ -1692,7 +1825,6 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                 />
                 {/* Texto */}
                 <Text
-                  ref={(node) => { if (node) shapeRefs.current[s.id] = node }}
                   x={0}
                   y={0}
                   text={isEditing ? '' : txt}
@@ -1700,6 +1832,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                   fill={textColor}
                   fontFamily="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif"
                   fontStyle="600"
+                  listening={false}
                 />
               </Group>
             )
@@ -1801,7 +1934,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                         const newX1 = e.target.x()
                         const newY1 = e.target.y()
                         // Recalcular el valor en metros automáticamente
-                        const nuevoValor = calcularValorCota(newX1, newY1, x2, y2)
+                        const nuevoValor = calcularValorCota(newX1, newY1, x2, y2, metrosPorPixel)
                         actualizarForma(s.id, { x1: newX1, y1: newY1, valor: nuevoValor })
                         e.target.position({ x: newX1, y: newY1 })
                       }}
@@ -1819,7 +1952,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                         const newX2 = e.target.x()
                         const newY2 = e.target.y()
                         // Recalcular el valor en metros automáticamente
-                        const nuevoValor = calcularValorCota(x1, y1, newX2, newY2)
+                        const nuevoValor = calcularValorCota(x1, y1, newX2, newY2, metrosPorPixel)
                         actualizarForma(s.id, { x2: newX2, y2: newY2, valor: nuevoValor })
                         e.target.position({ x: newX2, y: newY2 })
                       }}
@@ -1838,8 +1971,10 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
             if (!svgPath) return null
 
             const isSelected = selectedIds.includes(s.id)
-            const { fill: symFill, stroke: symStroke, bg: symBg } = symbolColors(s.nombre, isDark)
-            const selBorder = isDark ? '#F472B6' : '#DB2777'   // pink selección
+            const { stroke: symStroke } = symbolColors(s.nombre, isDark)
+            const selBorder = isDark ? '#38BDF8' : '#0F172A'
+            const stroke = isSelected ? selBorder : (modoExport ? '#0F172A' : symStroke)
+            const strokeWidth = modoExport ? 1.2 : 1.6
 
             return (
               <Group
@@ -1863,33 +1998,14 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
                 onDragMove={(e) => handleMultiDragMove(e, s.id)}
                 onDragEnd={(e) => handleMultiDragEnd(e, s.id)}
               >
-                {/* Fondo con color de categoría */}
-                <Rect
-                  x={-4} y={-4} width={108} height={78}
-                  fill={symBg}
-                  stroke={isSelected ? selBorder : symStroke}
-                  strokeWidth={isSelected ? 2 : 1}
-                  cornerRadius={6}
-                />
-                {/* Path del símbolo con fill interno */}
+                {/* Path del símbolo (estilo plano técnico) */}
                 <Path
                   data={svgPath}
-                  fill={symFill}
-                  stroke={symStroke}
-                  strokeWidth={2}
+                  fill={'transparent'}
+                  stroke={stroke}
+                  strokeWidth={strokeWidth}
                   strokeLinejoin="round"
                   strokeLinecap="round"
-                />
-                {/* Etiqueta del símbolo */}
-                <Text
-                  x={-4} y={68}
-                  text={String(s.nombre || '').charAt(0).toUpperCase() + String(s.nombre || '').slice(1)}
-                  fontSize={10}
-                  fill={symStroke}
-                  fontFamily="ui-sans-serif, system-ui, sans-serif"
-                  fontStyle="600"
-                  width={108}
-                  align="center"
                 />
               </Group>
             )

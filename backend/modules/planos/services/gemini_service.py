@@ -18,21 +18,36 @@ class GeminiServiceError(Exception):
 
 
 SYSTEM_PROMPT = (
-    "Eres un arquitecto/delineante experto. Analiza la imagen de un plano (2D) y extrae SOLO geometría básica. "
+    "Eres un arquitecto/delineante experto. Analiza la imagen de un plano (2D) y extrae elementos vectoriales editables. "
     "Devuelve ÚNICAMENTE un array JSON válido (sin markdown, sin texto adicional). "
     "Sistema de coordenadas: origen (0,0) en la esquina superior izquierda de la imagen; x hacia la derecha; y hacia abajo. "
     "Unidades: píxeles aproximados de la imagen enviada. "
-    "Elementos permitidos: muros, puertas, ventanas. "
-    "Representación: usa rectángulos alineados a ejes (width/height) y, si aplica, rotation en grados. "
+    "Elementos permitidos (tipo): muro, puerta, ventana, texto, cota, simbolo. "
+    "Prioridad de extracción: (1) muros perimetrales (perímetro exterior cerrado), (2) muros interiores principales, (3) puertas, (4) ventanas, (5) anotaciones (texto/cotas), (6) símbolos. "
+    "Representación: muros/puertas/ventanas como rectángulos (x,y,width,height). Evita rotation: usa rectángulos alineados a ejes (solo 0°). "
+    "Muros: deben ser segmentos largos con grosor uniforme (líneas gruesas). Evita fragmentar un mismo muro en muchos pedazos: prefiere menos muros más largos. "
+    "Regla CLAVE: NO uses tipo 'texto' para medidas. Todas las medidas (con unidades como m, cm, mm, pies/pulgadas o fracciones) deben ser tipo 'cota'. "
+    "texto: SOLO para etiquetas que NO sean medidas (ej: nombres de ambientes, notas, 'Sala', 'Cocina'). Si dudas, usa 'cota'. "
+    "texto: {id,tipo:'texto',x,y,texto,tamano_fuente?}. "
+    "cota: {id,tipo:'cota',x1,y1,x2,y2,valor} (valor en metros si se puede leer del plano, ej '3.20 m'). "
+    "simbolo: {id,tipo:'simbolo',x,y,nombre,categoria?,rotacion?,escala?} (nombre sugeridos: 'escalera'/'gradas', 'auto', 'cama', 'inodoro'). "
+    "Medidas: si el plano tiene cotas con texto (ej: '1.78m', '2.40 m', '27'-9.8\"', '2'-6\"'), genera un elemento 'cota' por cada una. "
+    "Para cada cota, ubica (x1,y1)-(x2,y2) EXACTAMENTE sobre la línea de cota (la línea fina con flechas/ticks), no sobre el muro. "
+    "Los endpoints (x1,y1) y (x2,y2) deben caer sobre los ticks/flechas y alinearse con las líneas de extensión que tocan la CARA del muro medido. "
+    "La cota debe ser paralela al muro que mide (horizontal o vertical). "
+    "No redondees agresivamente: conserva el texto tal cual aparece. "
     "Reglas: (1) NO inventes elementos fuera del dibujo; (2) evita duplicados; (3) prioriza muros perimetrales y divisiones principales; "
-    "(4) si hay duda entre puerta/ventana, clasifica como 'puerta' solo si se aprecia abertura/arco; caso contrario 'ventana'. "
-    "Formato esperado (ejemplo): "
-    "[{\"id\":\"m1\",\"tipo\":\"muro\",\"x\":10,\"y\":20,\"width\":300,\"height\":15},"
-    "{\"id\":\"p1\",\"tipo\":\"puerta\",\"x\":120,\"y\":35,\"width\":90,\"height\":15,\"rotacion\":0}]."
+    "(4) si hay duda entre puerta/ventana, clasifica como 'puerta' solo si se aprecia abertura/arco; caso contrario 'ventana'; "
+    "(5) si no puedes leer una medida, omite esa cota en vez de inventarla. "
+    "Ejemplo mínimo válido: "
+    "[{\"id\":\"m1\",\"tipo\":\"muro\",\"x\":10,\"y\":20,\"width\":300,\"height\":15,\"rotation\":0},"
+    "{\"id\":\"p1\",\"tipo\":\"puerta\",\"x\":120,\"y\":35,\"width\":90,\"height\":15,\"rotation\":0},"
+    "{\"id\":\"t1\",\"tipo\":\"texto\",\"x\":60,\"y\":60,\"texto\":\"Cocina\",\"tamano_fuente\":16},"
+    "{\"id\":\"s1\",\"tipo\":\"simbolo\",\"x\":200,\"y\":120,\"nombre\":\"escalera\",\"categoria\":\"circulacion\",\"rotacion\":0,\"escala\":1}]."
 )
 
 
-_ALLOWED_TIPOS = {"muro", "puerta", "ventana"}
+_ALLOWED_TIPOS = {"muro", "puerta", "ventana", "texto", "cota", "simbolo"}
 
 _ESTILOS_VALIDOS = {
     "contemporaneo",
@@ -126,20 +141,35 @@ def _sanitize_generation_options(opciones: Any) -> Dict[str, Any]:
 def construir_prompt_dinamico(*, modo: str, prompt_usuario: str = "", opciones: Optional[Dict[str, Any]] = None) -> str:
     """Construye un prompt estable para imagen o texto."""
     modo = str(modo or "image").strip().lower()
-    limpio = _sanitize_generation_options(opciones or {})
+    opciones = opciones or {}
+    limpio = _sanitize_generation_options(opciones)
+    solo_geometria = str(opciones.get("solo_geometria") or "").strip().lower() in {"1", "true", "si", "yes"}
 
     if modo == "text":
         base = (
             "Eres un arquitecto/delineante experto. Genera un plano 2D desde cero y devuelve SOLO un array JSON "
-            "válido con elementos de tipo muro, puerta o ventana. "
+            "válido. Tipos permitidos: muro, puerta, ventana, texto, simbolo, cota. "
             "Sistema de coordenadas: origen (0,0) arriba a la izquierda, x a la derecha, y hacia abajo. "
             "Usa dimensiones coherentes para una vivienda residencial y prioriza circulación realista. "
-            "Formato obligatorio por elemento: {id,tipo,x,y,width,height}. "
-            "No uses x1/y1/x2/y2, no uses polilíneas, no uses campos fuera del esquema. "
-            "Ejemplo válido: [{\"id\":\"m1\",\"tipo\":\"muro\",\"x\":10,\"y\":20,\"width\":320,\"height\":15}]."
+            "Muros/puertas/ventanas: {id,tipo,x,y,width,height,rotation?}. "
+            "texto: {id,tipo:'texto',x,y,texto,tamano_fuente?}. "
+            "simbolo: {id,tipo:'simbolo',x,y,nombre,categoria?,rotacion?,escala?}. "
+            "cota: {id,tipo:'cota',x1,y1,x2,y2,valor}. "
+            "No uses polilíneas ni campos fuera del esquema. "
+            "Ejemplo válido: [{\"id\":\"m1\",\"tipo\":\"muro\",\"x\":10,\"y\":20,\"width\":320,\"height\":15,\"rotation\":0}]."
         )
     else:
         base = SYSTEM_PROMPT
+
+    if solo_geometria:
+        base = (
+            "Eres un arquitecto/delineante experto. Analiza la imagen del plano (2D) y extrae SOLO muros, puertas y ventanas. "
+            "Devuelve ÚNICAMENTE un array JSON válido. "
+            "Tipos permitidos: muro, puerta, ventana. Ignora texto, cotas, símbolos y anotaciones. "
+            "Prioridad: (1) muros perimetrales (perímetro exterior), (2) muros interiores principales, (3) puertas, (4) ventanas. "
+            "Representación: rectángulos alineados a ejes (x,y,width,height). No uses rotation. "
+            "Evita fragmentación: prefiere muros largos y continuos."
+        )
 
     lineas_extra: list[str] = []
     if limpio:
@@ -152,6 +182,11 @@ def construir_prompt_dinamico(*, modo: str, prompt_usuario: str = "", opciones: 
     lineas_extra.append(
         "Instrucción final: devuelve SOLO un array JSON válido (sin markdown, sin texto adicional, sin comas finales)."
     )
+
+    if not solo_geometria:
+        lineas_extra.append(
+            "Checklist: incluye puertas/ventanas/muros y, si existen en el plano, añade cotas con su texto exacto y símbolos como 'escalera/gradas' y 'auto'."
+        )
     return f"{base}\n\n" + "\n".join(lineas_extra)
 
 
@@ -466,6 +501,77 @@ def _sanitize_vector_item(item: Any, idx: int) -> Dict[str, Any]:
         "tipo": tipo,
     }
 
+    if tipo == "texto":
+        x = _pick_number(item, "x", "left", "izquierda")
+        y = _pick_number(item, "y", "top", "arriba")
+        if x is None or y is None:
+            cx = _pick_number(item, "centro_x", "center_x", "cx")
+            cy = _pick_number(item, "centro_y", "center_y", "cy")
+            if cx is not None and cy is not None:
+                x, y = cx, cy
+        if x is None or y is None:
+            raise GeminiServiceError(f"Elemento #{idx + 1}: texto requiere 'x'/'y' numéricos")
+
+        texto = str(item.get("texto") or item.get("label") or item.get("nombre") or "").strip()
+        if not texto:
+            raise GeminiServiceError(f"Elemento #{idx + 1}: texto requiere 'texto'")
+
+        fs = _coerce_positive_int(item.get("tamano_fuente") or item.get("font_size") or item.get("size"))
+        out.update({"x": x, "y": y, "texto": texto})
+        if fs:
+            out["tamano_fuente"] = fs
+        return out
+
+    if tipo == "simbolo":
+        x = _pick_number(item, "x", "left", "izquierda")
+        y = _pick_number(item, "y", "top", "arriba")
+        if x is None or y is None:
+            cx = _pick_number(item, "centro_x", "center_x", "cx")
+            cy = _pick_number(item, "centro_y", "center_y", "cy")
+            if cx is not None and cy is not None:
+                x, y = cx, cy
+        if x is None or y is None:
+            raise GeminiServiceError(f"Elemento #{idx + 1}: simbolo requiere 'x'/'y' numéricos")
+
+        nombre = str(item.get("nombre") or item.get("name") or "").strip().lower()
+        if not nombre:
+            raise GeminiServiceError(f"Elemento #{idx + 1}: simbolo requiere 'nombre'")
+        categoria = str(item.get("categoria") or item.get("category") or "").strip().lower() or None
+
+        rotacion = _coerce_number(item.get("rotacion") or item.get("rotation"))
+        escala = _coerce_number(item.get("escala") or item.get("scale"))
+        if escala is None or not (0.1 <= escala <= 5.0):
+            escala = 1.0
+
+        out.update({"x": x, "y": y, "nombre": nombre, "escala": float(escala)})
+        if categoria:
+            out["categoria"] = categoria
+        if rotacion is not None:
+            out["rotacion"] = float(rotacion)
+        return out
+
+    if tipo == "cota":
+        x1c = _pick_number(item, "x1", "inicio_x", "start_x")
+        y1c = _pick_number(item, "y1", "inicio_y", "start_y")
+        x2c = _pick_number(item, "x2", "fin_x", "end_x")
+        y2c = _pick_number(item, "y2", "fin_y", "end_y")
+        if None in (x1c, y1c, x2c, y2c):
+            raise GeminiServiceError(f"Elemento #{idx + 1}: cota requiere x1,y1,x2,y2 numéricos")
+
+        valor = str(item.get("valor") or item.get("value") or "").strip()
+        if not valor:
+            # fallback: estimación por escala default (1m=100px)
+            dx = float(x2c) - float(x1c)
+            dy = float(y2c) - float(y1c)
+            dist_px = (dx * dx + dy * dy) ** 0.5
+            valor = f"{(dist_px / 100.0):.2f} m"
+
+        out.update({"x1": x1c, "y1": y1c, "x2": x2c, "y2": y2c, "valor": valor})
+        orient = str(item.get("orientacion") or item.get("orientation") or "").strip().lower()
+        if orient:
+            out["orientacion"] = orient
+        return out
+
     # Coordenadas base (tolerante para salidas de IA con alias)
     x1 = _pick_number(item, "x1", "inicio_x", "start_x")
     y1 = _pick_number(item, "y1", "inicio_y", "start_y")
@@ -531,6 +637,10 @@ def _sanitize_vector_item(item: Any, idx: int) -> Dict[str, Any]:
                 f"Elemento #{idx + 1}: muro requiere width/height o longitud/grosor"
             )
 
+        rot = _coerce_number(item.get("rotation") if item.get("rotation") is not None else item.get("rotacion"))
+        if rot is not None:
+            out["rotation"] = rot
+
     else:
         # puerta/ventana: usamos ancho (y opcional alto) o width/height
         width = _pick_number(item, "width", "ancho")
@@ -549,17 +659,17 @@ def _sanitize_vector_item(item: Any, idx: int) -> Dict[str, Any]:
                 f"Elemento #{idx + 1}: {tipo} requiere width/height o ancho"
             )
 
-        rot = _coerce_number(item.get("rotacion"))
+        rot = _coerce_number(item.get("rotation") if item.get("rotation") is not None else item.get("rotacion"))
         if rot is not None:
             out["rotation"] = rot
 
     return out
 
 
-def _validate_vector_data(data: Any) -> List[Dict[str, Any]]:
+def _validate_vector_data(data: Any, *, allow_empty: bool = False) -> List[Dict[str, Any]]:
     if not isinstance(data, list):
         raise GeminiServiceError("La IA no devolvió un array JSON")
-    if len(data) == 0:
+    if len(data) == 0 and not allow_empty:
         raise GeminiServiceError(
             "La IA no detectó geometría. Intenta con una imagen con mayor contraste."
         )

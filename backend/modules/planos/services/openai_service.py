@@ -23,6 +23,33 @@ def _pil_to_base64(image_pil) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def _fingerprint_item(it: dict) -> str:
+    t = str(it.get("tipo") or "").strip().lower()
+    if t == "cota":
+        def r(v):
+            try:
+                return round(float(v), 1)
+            except Exception:
+                return 0.0
+        return f"cota:{r(it.get('x1'))},{r(it.get('y1'))},{r(it.get('x2'))},{r(it.get('y2'))}:{str(it.get('valor') or '').strip()}"
+    if t == "texto":
+        def r(v):
+            try:
+                return round(float(v), 1)
+            except Exception:
+                return 0.0
+        return f"texto:{r(it.get('x'))},{r(it.get('y'))}:{str(it.get('texto') or '').strip()}"
+    if t == "simbolo":
+        def r(v):
+            try:
+                return round(float(v), 1)
+            except Exception:
+                return 0.0
+        return f"simbolo:{r(it.get('x'))},{r(it.get('y'))}:{str(it.get('nombre') or '').strip().lower()}"
+    # fallback
+    return str(it)
+
+
 def procesar_plano_con_openai(*, image_pil=None, prompt_usuario: str = "", opciones=None, modo: str = "image") -> GeminiParseResult:
     """Procesa una imagen con OpenAI Vision y devuelve vector_data como array JSON validado."""
 
@@ -33,10 +60,6 @@ def procesar_plano_con_openai(*, image_pil=None, prompt_usuario: str = "", opcio
     # Modelo debe soportar vision: gpt-4o, gpt-4o-mini o gpt-4turbo
     model = str(getattr(settings, "OPENAI_MODEL", "gpt-4o") or "").strip()
     if not model:
-        model = "gpt-4o"
-    
-    # Si hay imagen, forzar modelo con vision
-    if image_pil is not None and model != "gpt-4o":
         model = "gpt-4o"
 
     try:
@@ -70,10 +93,30 @@ def procesar_plano_con_openai(*, image_pil=None, prompt_usuario: str = "", opcio
                 "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"},
             })
 
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": contenido}],
-        )
+        def do_request(use_model: str):
+            return client.chat.completions.create(
+                model=use_model,
+                messages=[{"role": "user", "content": contenido}],
+                temperature=0,
+                top_p=0.1,
+                max_tokens=4000,
+            )
+
+        try:
+            resp = do_request(model)
+        except Exception as e:
+            # Fallback: si el modelo elegido no soporta imágenes, reintenta con gpt-4o.
+            msg = str(e).lower()
+            should_fallback = (
+                image_pil is not None
+                and model != "gpt-4o"
+                and ("image" in msg or "vision" in msg or "multimodal" in msg)
+            )
+            if should_fallback:
+                resp = do_request("gpt-4o")
+                model = "gpt-4o"
+            else:
+                raise
 
         raw_text = str(resp.choices[0].message.content or "")
         if not raw_text:
@@ -81,6 +124,60 @@ def procesar_plano_con_openai(*, image_pil=None, prompt_usuario: str = "", opcio
 
         parsed = _extract_json_array(raw_text)
         vector_data = _validate_vector_data(parsed)
+
+        # Segundo pase: si faltan cotas, pedir SOLO cotas/textos de medida y mezclar.
+        has_cotas = any(isinstance(it, dict) and str(it.get("tipo") or "").lower() == "cota" for it in vector_data)
+        if (not has_cotas) and image_pil is not None and modo in {"image", "hybrid"}:
+            try:
+                prompt_dims = (
+                    "Extrae SOLO cotas (tipo='cota') del plano. "
+                    "NO devuelvas elementos tipo 'texto'. "
+                    "Devuelve SOLO un array JSON válido. "
+                    "Para 'cota' usa {id,tipo:'cota',x1,y1,x2,y2,valor}. 'valor' debe ser el texto exacto (ej: 27'-9.8\", 2'-6\", 1.78m). "
+                    "Ubica (x1,y1)-(x2,y2) sobre la línea de cota con sus ticks/flechas. "
+                    "Si no hay cotas legibles, devuelve []."
+                )
+
+                contenido2: list[dict] = [
+                    {"type": "text", "text": prompt_dims},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{_pil_to_base64(image_pil)}"},
+                    },
+                ]
+
+                resp2 = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": contenido2}],
+                    temperature=0,
+                    top_p=0.1,
+                    max_tokens=2000,
+                )
+
+                raw2 = str(resp2.choices[0].message.content or "")
+                if raw2:
+                    parsed2 = _extract_json_array(raw2)
+                    extras = _validate_vector_data(parsed2, allow_empty=True)
+                    # Filtramos extras a cotas (evitar confundir cotas con etiquetas)
+                    extras = [
+                        it for it in extras
+                        if str(it.get("tipo") or "").lower() in {"cota"}
+                    ]
+
+                    seen = {_fingerprint_item(it) for it in vector_data if isinstance(it, dict)}
+                    merged = list(vector_data)
+                    for it in extras:
+                        fp = _fingerprint_item(it)
+                        if fp in seen:
+                            continue
+                        merged.append(it)
+                        seen.add(fp)
+
+                    vector_data = merged
+                    raw_text = f"{raw_text}\n\n---\n\n{raw2}"
+            except Exception:
+                logger.exception("Fallo segundo pase de cotas con OpenAI")
+
         return GeminiParseResult(vector_data=vector_data, raw_text=raw_text)
 
     except GeminiServiceError:

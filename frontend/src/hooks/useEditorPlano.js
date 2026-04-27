@@ -145,8 +145,15 @@ export function useEditorPlano(proyectoId) {
         const json = Array.isArray(response)
           ? response
           : (Array.isArray(response?.vector_data) ? response.vector_data : [])
+        const escala = response?.escala_metros_por_pixel
         // El backend ya guarda en BD; aquí actualizamos el estado local.
-        setPlanoData((prev) => (prev ? { ...prev, datos_vectoriales: json } : prev))
+        setPlanoData((prev) => (prev
+          ? {
+              ...prev,
+              datos_vectoriales: json,
+              ...(escala !== undefined && escala !== null ? { escala_metros_por_pixel: escala } : {}),
+            }
+          : prev))
         return response
       } catch (e) {
         setError(String(toErrorMessage(e)))
@@ -166,7 +173,8 @@ export function useEditorPlano(proyectoId) {
       const idx = current.length
       const nextId = Date.now()
 
-      const pxPorMetro = 100
+      const metrosPorPixel = Number(planoData?.escala_metros_por_pixel)
+      const pxPorMetro = metrosPorPixel > 0 ? (1 / metrosPorPixel) : 100
       const espesoresM = {
         muro: 0.2,
         puerta: 0.15,
@@ -209,7 +217,7 @@ export function useEditorPlano(proyectoId) {
       setDatosVectorialesLocal(next)
       return next
     },
-    [datosVectoriales, setDatosVectorialesLocal]
+    [datosVectoriales, setDatosVectorialesLocal, planoData?.escala_metros_por_pixel]
   )
 
   // ─── TEXTO libre ─────────────────────────────────────────────────────

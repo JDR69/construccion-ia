@@ -8,6 +8,8 @@ from rest_framework.response import Response
 
 from .services.gemini_service import GeminiServiceError, procesar_plano_con_gemini
 from .services.preview_service import generar_pack_previews
+from .services.scale_service import infer_escala_metros_por_pixel
+from .services.vector_postprocess import postprocess_vector_data
 from django.conf import settings
 
 from .models import Ambiente, Plano
@@ -135,7 +137,12 @@ class PlanoViewSet(viewsets.ModelViewSet):
                     pass
 
                 # Reducción segura para evitar inputs enormes.
-                max_side = 3072
+                # Puedes subirlo por request con opciones.max_side_px (ej: 4096/6144) para más detalle.
+                try:
+                    max_side = int((opciones or {}).get("max_side_px") or 3072)
+                except Exception:
+                    max_side = 3072
+                max_side = max(1024, min(8192, max_side))
                 if max(img.size) > max_side:
                     img.thumbnail((max_side, max_side))
 
@@ -156,7 +163,14 @@ class PlanoViewSet(viewsets.ModelViewSet):
                     opciones=opciones,
                     modo=modo,
                 )
-            plano.datos_vectoriales = result.vector_data
+            processed_vector_data, _stats = postprocess_vector_data(result.vector_data)
+            plano.datos_vectoriales = processed_vector_data
+
+            inferred_scale = None
+            if escala_metros_por_pixel in (None, ""):
+                inferred_scale = infer_escala_metros_por_pixel(plano.datos_vectoriales)
+                if inferred_scale is not None:
+                    escala_metros_por_pixel = float(inferred_scale.metros_por_pixel)
 
             update_fields = [
                 "datos_vectoriales",
@@ -176,14 +190,15 @@ class PlanoViewSet(viewsets.ModelViewSet):
 
             previews = None
             try:
-                previews = generar_pack_previews(result.vector_data, opciones)
+                previews = generar_pack_previews(plano.datos_vectoriales, opciones)
             except Exception:  # noqa: BLE001
                 logger.exception("No se pudieron generar previews del plano")
 
             return Response(
                 {
-                    "vector_data": result.vector_data,
+                    "vector_data": plano.datos_vectoriales,
                     "previews": previews,
+                    "escala_metros_por_pixel": float(plano.escala_metros_por_pixel),
                 },
                 status=status.HTTP_200_OK,
             )

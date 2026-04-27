@@ -172,6 +172,7 @@ export function EditorPage() {
           onAddTexto={addTexto}
           onAddCota={addCota}
           onAddSimbolo={addSimbolo}
+          escalaMetrosPorPixel={planoData?.escala_metros_por_pixel}
           exportTitulo={proyecto?.titulo || planoData?.nombre || `Plano #${planoData?.id}` || 'Casa'}
           exportSubtitulo={planoData ? `Plano #${planoData.id} — Proyecto ${planoData.proyecto}` : ''}
           exportUbicacion={planoData?.nombre || ''}

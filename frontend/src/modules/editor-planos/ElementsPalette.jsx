@@ -77,6 +77,38 @@ function IconToilet(props) {
   )
 }
 
+function IconCar(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M3 14v-2.5l2-4A2 2 0 017 6h10a2 2 0 011.8 1.1l2.2 4.4V14"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 14h14" />
+      <circle cx="7" cy="16.5" r="1.5" strokeWidth="1.5" />
+      <circle cx="17" cy="16.5" r="1.5" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+function IconStairs(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M4 18h6v-4h4v-4h6"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 18v-2h4v2" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 14v-2h4v2" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14 10V8h6v2" />
+    </svg>
+  )
+}
+
 // ─── Definición de todos los elementos del pallete ──────────────────────────
 // tipo: qué función del hook se invocará
 // payload: datos extra que se pasan junto con la posición de drop
@@ -148,6 +180,20 @@ const PALETTE_GROUPS = [
         Icon: IconToilet,
         payload: { nombre: 'inodoro', categoria: 'sanitario', rotacion: 0, escala: 1 },
         hint: 'Arrastra para colocar un inodoro',
+      },
+      {
+        tipo: 'simbolo',
+        label: 'Auto',
+        Icon: IconCar,
+        payload: { nombre: 'auto', categoria: 'vehiculo', rotacion: 0, escala: 1 },
+        hint: 'Arrastra para colocar un auto',
+      },
+      {
+        tipo: 'simbolo',
+        label: 'Escalera',
+        Icon: IconStairs,
+        payload: { nombre: 'escalera', categoria: 'circulacion', rotacion: 0, escala: 1 },
+        hint: 'Arrastra para colocar una escalera / gradas',
       },
     ],
   },
