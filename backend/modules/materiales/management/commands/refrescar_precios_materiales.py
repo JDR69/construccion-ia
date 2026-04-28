@@ -72,7 +72,8 @@ class Command(BaseCommand):
 
         materiales = [m.strip() for m in materiales if isinstance(m, str) and m.strip()]
         if not materiales:
-            raise CommandError("No hay materiales para procesar.")
+            self.stdout.write(self.style.WARNING("No hay materiales para procesar."))
+            return
 
         cache_horas = max(1, int(options.get("cache_horas") or 168))
 
