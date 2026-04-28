@@ -50,3 +50,19 @@ export async function procesarPlanoIA(planoId, payload) {
 
   return res.data
 }
+
+/**
+ * Punto 1 — Analiza una imagen de plano sin prompt del usuario.
+ * Solo acepta el archivo; el prompt estático lo define el backend.
+ * Endpoint dedicado: POST /api/planos/{id}/analizar-imagen/
+ */
+export async function analizarImagenPlano(planoId, file) {
+  const form = new FormData()
+  form.append('file', file)
+
+  const res = await http.post(`${BASE}${planoId}/analizar-imagen/`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+
+  return res.data
+}

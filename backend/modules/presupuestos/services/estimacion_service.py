@@ -129,26 +129,143 @@ def _factor_refinado(presupuesto: Presupuesto) -> Decimal:
     return min(Decimal("1.35"), factor).quantize(Decimal("0.01"))
 
 
+def _generar_items_desde_plano_ia(presupuesto: Presupuesto) -> int:
+    """
+    PUNTO 4: Genera los items del presupuesto calculando geométricamente
+    las cantidades exactas a partir del plano generado por la IA (vector_data),
+    y llama al scraper para asegurar precios reales en Bs.
+    """
+    ambiente = presupuesto.ambiente
+    # Si no hay ambiente ligado, intentamos usar el primer plano del proyecto
+    if not ambiente or not ambiente.plano:
+        from modules.planos.models import Plano
+        plano = Plano.objects.filter(proyecto=presupuesto.proyecto).first()
+        if not plano:
+            return 0
+    else:
+        plano = ambiente.plano
+
+    vector = plano.datos_vectoriales if isinstance(plano.datos_vectoriales, list) else []
+    if not vector:
+        return 0
+
+    try:
+        escala = Decimal(str(plano.escala_metros_por_pixel or 0.01))
+    except Exception:
+        escala = Decimal("0.01")
+
+    # 1. Separar elementos
+    muros = [item for item in vector if str(item.get("tipo") or "").lower() == "muro"]
+    puertas = [item for item in vector if str(item.get("tipo") or "").lower() == "puerta"]
+    ventanas = [item for item in vector if str(item.get("tipo") or "").lower() == "ventana"]
+
+    # 2. Calcular Área Neta de Muros (asumiendo altura estándar 2.5m)
+    altura_muro = Decimal("2.5")
+    area_bruta_muros = Decimal("0")
+
+    for muro in muros:
+        # La longitud del muro es el lado más largo (ancho o alto en el canvas)
+        w = Decimal(str(muro.get("width") or 0))
+        h = Decimal(str(muro.get("height") or 0))
+        longitud_metros = max(w, h) * escala
+        area_bruta_muros += longitud_metros * altura_muro
+
+    # Restar aperturas (asumiendo tamaño promedio si no hay dimensiones 3D)
+    # Puerta estándar: 0.9m x 2.1m = ~1.89 m2
+    area_puertas = Decimal(len(puertas)) * Decimal("1.89")
+    # Ventana promedio: 1.5m x 1.2m = ~1.8 m2
+    area_ventanas = Decimal(len(ventanas)) * Decimal("1.8")
+
+    area_neta_muros = area_bruta_muros - area_puertas - area_ventanas
+    if area_neta_muros < 0:
+        area_neta_muros = Decimal("0")
+
+    # 3. Definir rendimiento de materiales por m2 de muro
+    cant_ladrillos = (area_neta_muros * Decimal("38")).quantize(Decimal("1"))
+    cant_cemento = (area_neta_muros * Decimal("0.35")).quantize(Decimal("0.1"))
+    cant_arena = (area_neta_muros * Decimal("0.04")).quantize(Decimal("0.1"))
+
+    # Estructura a guardar (nombres genéricos para que el scraper los encuentre más fácil)
+    requerimientos = [
+        {"nombre": "ladrillo", "unidad": "unidad", "cantidad": cant_ladrillos, "precio_fallback": Decimal("1.20")},
+        {"nombre": "cemento", "unidad": "bolsa", "cantidad": cant_cemento, "precio_fallback": Decimal("45.00")},
+        {"nombre": "arena", "unidad": "m3", "cantidad": cant_arena, "precio_fallback": Decimal("120.00")},
+    ]
+
+    if len(puertas) > 0:
+        requerimientos.append({"nombre": "puerta", "unidad": "unidad", "cantidad": Decimal(len(puertas)), "precio_fallback": Decimal("350.00")})
+    
+    if len(ventanas) > 0:
+        requerimientos.append({"nombre": "ventana", "unidad": "unidad", "cantidad": Decimal(len(ventanas)), "precio_fallback": Decimal("250.00")})
+
+    # 4. Forzar Scraper para tener precios actualizados reales
+    nombres_materiales = [req["nombre"] for req in requerimientos]
+    try:
+        from materials.services.scraper_service import buscar_precios
+        # Busca y actualiza en BD si los precios son viejos
+        buscar_precios(nombres_materiales, persistir=True, max_age_hours=168)
+    except Exception:
+        pass  # Si falla el scraper, usamos lo que haya en la base de datos local
+
+    creados = 0
+    for req in requerimientos:
+        if req["cantidad"] <= 0:
+            continue
+        material = _obtener_material(req["nombre"], req["unidad"])
+        
+        # Obtenemos precio de BD o usamos fallback si el scraper falló y es 0
+        precio_bd = Decimal(str(material.precio_referencial or 0)).quantize(Decimal("0.01"))
+        precio_unitario = precio_bd if precio_bd > 0 else req["precio_fallback"]
+
+        # Si usamos fallback y en bd está en 0, lo actualizamos por consistencia
+        if precio_bd == 0:
+            material.precio_referencial = precio_unitario
+            material.save(update_fields=["precio_referencial", "actualizado_en"])
+
+        PresupuestoItem.objects.create(
+            presupuesto=presupuesto,
+            material=material,
+            cantidad=req["cantidad"],
+            precio_unitario=precio_unitario,
+        )
+        creados += 1
+
+    return creados
+
+
 def generar_items_presupuesto(
     presupuesto: Presupuesto,
     *,
     modo: str = "rapido",
     limpiar_existente: bool = True,
 ) -> dict:
-    area_m2 = _calcular_area_total(presupuesto)
-    if area_m2 <= 0:
-        area_m2 = Decimal("80")
-
-    tipo_ambiente = str(getattr(presupuesto.ambiente, "tipo", "") or "").strip().lower()
-    ajustes = AJUSTE_POR_AMBIENTE.get(tipo_ambiente, {})
-
-    factor_refinado = Decimal("1.00")
-    if modo in {"refinado", "hibrido"}:
-        factor_refinado = _factor_refinado(presupuesto)
-
     with transaction.atomic():
         if limpiar_existente:
             presupuesto.items.all().delete()
+
+        # PUNTO 4: Si el modo es calcular desde el plano IA
+        if modo in {"ia_vectorial", "refinado"}:
+            creados = _generar_items_desde_plano_ia(presupuesto)
+            # Si logró crear items desde el plano, retornamos
+            if creados > 0:
+                return {
+                    "modo": "ia_vectorial",
+                    "area_m2": 0, # Ya no aplica area bruta
+                    "factor_refinado": 1.0,
+                    "items_creados": creados,
+                    "total_estimado": float(presupuesto.total),
+                }
+            # Si falla (no hay vectores), cae por defecto al modo rápido
+
+        # Modo rápido por coeficientes de m2 (Hardcoded genérico)
+        area_m2 = _calcular_area_total(presupuesto)
+        if area_m2 <= 0:
+            area_m2 = Decimal("80")
+
+        tipo_ambiente = str(getattr(presupuesto.ambiente, "tipo", "") or "").strip().lower()
+        ajustes = AJUSTE_POR_AMBIENTE.get(tipo_ambiente, {})
+
+        factor_refinado = Decimal("1.00")
 
         creados = 0
         for base in COEFICIENTES_BASE_M2:

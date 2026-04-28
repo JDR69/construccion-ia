@@ -259,8 +259,25 @@ export function SubidaPlanoIA({ isProcessing, onUpload, error }) {
           ) : null}
 
           {(soloImagen || hibrido) ? (
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-              <label className="mb-2 block text-xs uppercase tracking-wide text-slate-300">Imagen del plano</label>
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
+
+              {/* Banner informativo solo en modo imagen puro */}
+              {soloImagen && (
+                <div className="flex items-start gap-3 rounded-xl border border-sky-500/20 bg-sky-500/10 px-4 py-3">
+                  <svg className="mt-0.5 h-4 w-4 shrink-0 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347a3.001 3.001 0 00-.765 1.77A4.5 4.5 0 0112 21a4.5 4.5 0 01-3.324-7.347l-.345-.346z" />
+                  </svg>
+                  <div>
+                    <p className="text-xs font-semibold text-sky-300">Análisis automático — sin configuración</p>
+                    <p className="mt-0.5 text-xs text-sky-400/80">
+                      La IA interpreta el plano con un prompt inteligente predefinido. Solo sube la imagen y obtendrás muros, puertas y ventanas detectados automáticamente.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <label className="block text-xs uppercase tracking-wide text-slate-300">Imagen del plano</label>
               <button
                 type="button"
                 onClick={onPick}
@@ -290,27 +307,32 @@ export function SubidaPlanoIA({ isProcessing, onUpload, error }) {
                 className={[
                   'w-full rounded-2xl border-2 border-dashed p-8 text-left transition',
                   'bg-slate-950/60',
-                  dragOver ? 'border-indigo-400' : 'border-slate-700',
+                  dragOver ? 'border-sky-400' : (file ? 'border-sky-600' : 'border-slate-700'),
                   isProcessing ? 'opacity-70 cursor-not-allowed' : 'hover:border-slate-500',
                 ].join(' ')}
               >
                 <div className="flex items-center justify-between gap-6">
                   <div>
-                    <div className="text-base font-semibold text-white">
-                      {file ? `Archivo seleccionado: ${file.name}` : 'Arrastra tu plano aqui o haz clic para seleccionar'}
+                    <div className={['text-base font-semibold', file ? 'text-sky-300' : 'text-white'].join(' ')}>
+                      {file ? `✓ ${file.name}` : 'Arrastra tu plano aquí o haz clic para seleccionar'}
                     </div>
-                    <div className="mt-2 text-sm text-slate-300">
-                      Formatos: JPG, PNG
+                    <div className="mt-2 text-sm text-slate-400">
+                      JPG, PNG · Máx. 10 MB
                     </div>
                   </div>
 
                   {isProcessing ? (
                     <div className="flex items-center gap-3 text-sm text-slate-200">
-                      <div className="h-5 w-5 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
-                      Procesando...
+                      <div className="h-5 w-5 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+                      Analizando…
                     </div>
                   ) : (
-                    <div className="text-sm text-slate-200">Subir</div>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-300">
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                          d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                      </svg>
+                    </div>
                   )}
                 </div>
               </button>
