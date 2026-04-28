@@ -3,7 +3,8 @@ from decimal import Decimal
 
 from django.db import transaction
 
-from modules.materiales.models import Material
+from materials.services.utils.normalizer import coincide_material, normalizar_material
+from modules.materiales.models import Material, PrecioMaterialScrapeado
 
 from ..models import Presupuesto, PresupuestoItem
 
@@ -24,14 +25,60 @@ AJUSTE_POR_AMBIENTE = {
 
 
 def _obtener_material(nombre: str, unidad: str) -> Material | None:
-    material = Material.objects.filter(nombre__iexact=nombre).first()
-    if not material:
+    nombre = (nombre or "").strip()
+    if not nombre:
         return None
-    if material.unidad or not unidad:
-        return material
-    material.unidad = unidad
-    material.save(update_fields=["unidad", "actualizado_en"])
+
+    # 1) Match exacto en catálogo
+    material = Material.objects.filter(nombre__iexact=nombre).first()
+
+    # 2) Match por contiene (si en BD está más específico: "Cemento IP-30 ...")
+    if not material:
+        material = Material.objects.filter(nombre__icontains=nombre).order_by("nombre").first()
+
+    # 3) Derivar material desde la tabla de precios scrapeados (si tiene FK a Material)
+    if not material:
+        registro = (
+            PrecioMaterialScrapeado.objects.exclude(material__isnull=True)
+            .filter(nombre_material__icontains=nombre)
+            .order_by("precio", "-scrapeado_en")
+            .select_related("material")
+            .first()
+        )
+        material = getattr(registro, "material", None)
+
     return material
+
+
+def _obtener_precio_desde_scrapeado(nombre: str, material: Material | None = None) -> Decimal | None:
+    """Devuelve el mejor precio disponible desde la tabla PrecioMaterialScrapeado.
+
+    No crea ni actualiza nada; solo lee la BD.
+    """
+    nombre_norm = normalizar_material(nombre or "")
+    if not nombre_norm:
+        return None
+
+    qs = PrecioMaterialScrapeado.objects.all()
+    if material is not None:
+        qs = qs.filter(material=material)
+    else:
+        qs = qs.filter(nombre_material__icontains=nombre_norm)
+
+    # Trae candidatos y filtra con una coincidencia más estricta en Python.
+    candidatos = list(qs.order_by("precio", "-scrapeado_en")[:200])
+    filtrados = [c for c in candidatos if coincide_material(nombre_norm, c.nombre_material or "")]
+    elegido = (filtrados[0] if filtrados else (candidatos[0] if candidatos else None))
+    if not elegido:
+        return None
+
+    try:
+        precio = Decimal(str(elegido.precio or 0)).quantize(Decimal("0.01"))
+    except Exception:  # noqa: BLE001
+        return None
+    if precio <= 0:
+        return None
+    return precio
 
 
 def _calcular_area_total(presupuesto: Presupuesto) -> Decimal:
@@ -188,16 +235,16 @@ def _generar_items_desde_plano_ia(presupuesto: Presupuesto) -> int:
 
     # Estructura a guardar (nombres genéricos para que el scraper los encuentre más fácil)
     requerimientos = [
-        {"nombre": "ladrillo", "unidad": "unidad", "cantidad": cant_ladrillos, "precio_fallback": Decimal("1.20")},
-        {"nombre": "cemento", "unidad": "bolsa", "cantidad": cant_cemento, "precio_fallback": Decimal("45.00")},
-        {"nombre": "arena", "unidad": "m3", "cantidad": cant_arena, "precio_fallback": Decimal("120.00")},
+        {"nombre": "ladrillo", "unidad": "unidad", "cantidad": cant_ladrillos},
+        {"nombre": "cemento", "unidad": "bolsa", "cantidad": cant_cemento},
+        {"nombre": "arena", "unidad": "m3", "cantidad": cant_arena},
     ]
 
     if len(puertas) > 0:
-        requerimientos.append({"nombre": "puerta", "unidad": "unidad", "cantidad": Decimal(len(puertas)), "precio_fallback": Decimal("350.00")})
+        requerimientos.append({"nombre": "puerta", "unidad": "unidad", "cantidad": Decimal(len(puertas))})
     
     if len(ventanas) > 0:
-        requerimientos.append({"nombre": "ventana", "unidad": "unidad", "cantidad": Decimal(len(ventanas)), "precio_fallback": Decimal("250.00")})
+        requerimientos.append({"nombre": "ventana", "unidad": "unidad", "cantidad": Decimal(len(ventanas))})
 
     # 4. Scraper (NO recomendado dentro de requests en producción)
     nombres_materiales = [req["nombre"] for req in requerimientos]
@@ -224,7 +271,10 @@ def _generar_items_desde_plano_ia(presupuesto: Presupuesto) -> int:
 
         precio_bd = Decimal(str(material.precio_referencial or 0)).quantize(Decimal("0.01"))
         if precio_bd <= 0:
-            omitidos.append({"nombre": req["nombre"], "motivo": "sin precio referencial"})
+            precio_bd = _obtener_precio_desde_scrapeado(req["nombre"], material)
+
+        if not precio_bd or precio_bd <= 0:
+            omitidos.append({"nombre": req["nombre"], "motivo": "sin precio en BD"})
             continue
 
         precio_unitario = precio_bd
@@ -293,8 +343,10 @@ def generar_items_presupuesto(
 
             precio_unitario = Decimal(str(material.precio_referencial or 0)).quantize(Decimal("0.01"))
             if precio_unitario <= 0:
-                omitidos.append({"nombre": nombre_material, "motivo": "sin precio referencial"})
-                continue
+                precio_unitario = _obtener_precio_desde_scrapeado(nombre_material, material)
+                if not precio_unitario or precio_unitario <= 0:
+                    omitidos.append({"nombre": nombre_material, "motivo": "sin precio en BD"})
+                    continue
 
             PresupuestoItem.objects.create(
                 presupuesto=presupuesto,
