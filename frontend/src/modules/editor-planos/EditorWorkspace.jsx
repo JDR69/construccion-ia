@@ -3,6 +3,8 @@ import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import { CanvasBoard } from './CanvasBoard'
 import { EditorToolbar } from './EditorToolbar'
 import { ElementsPalette } from './ElementsPalette'
+import { Modal } from '../../ui/Modal'
+import { Button } from '../../ui/Button'
 
 export const EditorWorkspace = forwardRef(function EditorWorkspace(
   {
@@ -35,6 +37,10 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
   const [canUndoState, setCanUndoState] = useState(false)
   const [canRedoState, setCanRedoState] = useState(false)
   const [zoomLevelState, setZoomLevelState] = useState('100%')
+
+  // Punto 3: Modal de configuración previa
+  const [pendingDrop, setPendingDrop] = useState(null)
+  const [formDims, setFormDims] = useState({ largo: 1, grosor: 0.15, rotacion: 0 })
 
   useImperativeHandle(
     ref,
@@ -71,23 +77,15 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     const pxPorMetro = metrosPorPixel > 0 ? (1 / metrosPorPixel) : 100
 
     if (tipo === 'muro' || tipo === 'puerta' || tipo === 'ventana') {
-      // addElemento crea el elemento con posición por defecto;
-      // para que aparezca donde se soltó lo inyectamos directamente al array.
-      const espesores   = { muro: 0.2, puerta: 0.15, ventana: 0.1 }
-      const largos      = { muro: 1,   puerta: 0.9,  ventana: 1.2 }
-      const espesorPx   = (espesores[tipo] ?? 0.18) * pxPorMetro
-      const largoPx     = (largos[tipo]    ?? 1)    * pxPorMetro
-      const nuevo = {
-        id: Date.now(),
-        tipo,
-        x: x - largoPx / 2,
-        y: y - espesorPx / 2,
-        width:  largoPx,
-        height: espesorPx,
-        rotation: 0,
-        ...payload,
-      }
-      onChange?.([...(Array.isArray(datosVectoriales) ? datosVectoriales : []), nuevo])
+      const espesores = { muro: 0.2, puerta: 0.15, ventana: 0.1 }
+      const largos    = { muro: 1,   puerta: 0.9,  ventana: 1.2 }
+      
+      setFormDims({ 
+        largo: largos[tipo] || 1, 
+        grosor: espesores[tipo] || 0.15,
+        rotacion: 0
+      })
+      setPendingDrop({ tipo, payload, x, y })
       return
     }
 
@@ -117,8 +115,85 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     }
   }
 
+  const handleConfirmDrop = () => {
+    if (!pendingDrop) return
+    const { tipo, payload, x, y } = pendingDrop
+    const metrosPorPixel = Number(escalaMetrosPorPixel)
+    const pxPorMetro = metrosPorPixel > 0 ? (1 / metrosPorPixel) : 100
+
+    const largoPx = Number(formDims.largo) * pxPorMetro
+    const espesorPx = Number(formDims.grosor) * pxPorMetro
+
+    const nuevo = {
+      id: Date.now(),
+      tipo,
+      x: x - largoPx / 2,
+      y: y - espesorPx / 2,
+      width:  largoPx,
+      height: espesorPx,
+      rotation: Number(formDims.rotacion),
+      ...payload,
+    }
+    onChange?.([...(Array.isArray(datosVectoriales) ? datosVectoriales : []), nuevo])
+    setPendingDrop(null)
+  }
+
   return (
     <div className="relative w-full h-full">
+      {/* Modal del Punto 3: Configuracion previa */}
+      {pendingDrop && (
+        <Modal
+          open={true}
+          onClose={() => setPendingDrop(null)}
+          title={`Configurar ${pendingDrop.tipo}`}
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                Largo (metros)
+              </label>
+              <input
+                type="number"
+                step="0.05"
+                className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                value={formDims.largo}
+                onChange={e => setFormDims(prev => ({ ...prev, largo: e.target.value }))}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                Grosor (metros)
+              </label>
+              <input
+                type="number"
+                step="0.05"
+                className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                value={formDims.grosor}
+                onChange={e => setFormDims(prev => ({ ...prev, grosor: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                Orientación
+              </label>
+              <select
+                className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-white"
+                value={formDims.rotacion}
+                onChange={e => setFormDims(prev => ({ ...prev, rotacion: e.target.value }))}
+              >
+                <option value="0">Horizontal (0°)</option>
+                <option value="90">Vertical (90°)</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <Button variant="secondary" onClick={() => setPendingDrop(null)}>Cancelar</Button>
+              <Button variant="primary" onClick={handleConfirmDrop}>Insertar</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* ── Panel de previews de IA (lado izquierdo) ─── */}
       {iaPreviews && (
         <div className={[

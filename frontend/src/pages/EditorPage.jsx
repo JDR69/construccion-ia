@@ -56,6 +56,7 @@ export function EditorPage() {
     setDatosVectorialesLocal,
     saveDatosVectoriales,
     procesarIA,
+    analizarImagenIA,
     addElemento,
     addTexto,
     addCota,
@@ -152,7 +153,14 @@ export function EditorPage() {
           error={error}
           onUpload={async (payload) => {
             try {
-              const response = await procesarIA(payload)
+              let response
+              // Punto 1: modo image → endpoint dedicado sin prompt del usuario
+              if (payload.modo === 'image' && payload.file) {
+                response = await analizarImagenIA(payload.file)
+              } else {
+                // text / hybrid → endpoint genérico con prompt y opciones
+                response = await procesarIA(payload)
+              }
               handleIAPreviews(response?.previews || null)
               setMode('auto')
             } catch {

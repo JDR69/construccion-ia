@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { http } from '../../api/config'
-import { createPresupuesto, getPresupuestosByProyecto, generarPresupuestoAutomatico } from '../../api/presupuestos'
+import { createPresupuesto, getPresupuestosByProyecto, generarPresupuestoAutomatico, getPresupuestoItems } from '../../api/presupuestos'
 import { Button } from '../../ui/Button'
 import { Modal } from '../../ui/Modal'
 
@@ -117,6 +117,26 @@ export function EstimacionModal({ open, onClose, proyecto }) {
   const [resumen, setResumen] = useState(null)
   const [generado, setGenerado] = useState(false)
 
+  const handleExportarPDF = async () => {
+    if (!presupuesto) return
+    try {
+      const res = await http.get(`/api/presupuestos/${presupuesto.id}/exportar-pdf/`, {
+        responseType: 'blob', // Importante para recibir el archivo binario
+      })
+      
+      // Crear un enlace temporal para forzar la descarga
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `Presupuesto_${presupuesto.id}.pdf`)
+      document.body.appendChild(link)
+      link.click()
+      link.parentNode.removeChild(link)
+    } catch (e) {
+      setError('Error al descargar el PDF')
+    }
+  }
+
   /* Carga planos y presupuestos del proyecto */
   useEffect(() => {
     if (!open || !proyectoId) return
@@ -155,7 +175,18 @@ export function EstimacionModal({ open, onClose, proyecto }) {
         }
 
         setPlanos(planosData)
-        setPresupuesto(presupuestosData[0])
+        
+        const presupuestoActivo = presupuestosData[0]
+        setPresupuesto(presupuestoActivo)
+
+        // Cargar los items existentes para que no se borren visualmente
+        if (presupuestoActivo) {
+          const itemsData = await getPresupuestoItems(presupuestoActivo.id)
+          if (!cancelled && itemsData && itemsData.length > 0) {
+            setItems(itemsData)
+            setGenerado(true)
+          }
+        }
       } catch (e) {
         if (!cancelled) setError(toErrorMessage(e))
       }
@@ -228,6 +259,11 @@ export function EstimacionModal({ open, onClose, proyecto }) {
           {/* Info del modo */}
           <p className="text-xs text-slate-400 max-w-sm">{INFO_MODO[modo]}</p>
           <div className="flex gap-2">
+            {generado && (
+              <Button variant="secondary" onClick={handleExportarPDF} className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20">
+                Descargar PDF
+              </Button>
+            )}
             <Button variant="secondary" onClick={onClose}>
               Cerrar
             </Button>

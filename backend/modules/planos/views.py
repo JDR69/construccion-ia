@@ -6,7 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from .services.gemini_service import GeminiServiceError, procesar_plano_con_gemini
+from .services.gemini_service import GeminiServiceError, analizar_imagen_plano, procesar_plano_con_gemini
 from .services.preview_service import generar_pack_previews
 from .services.scale_service import infer_escala_metros_por_pixel
 from .services.vector_postprocess import postprocess_vector_data
@@ -49,6 +49,12 @@ class PlanoViewSet(viewsets.ModelViewSet):
             )
 
         prompt_usuario = str(request.data.get("prompt") or "").strip()
+
+        # Punto 1: en modo image el prompt es estático (SYSTEM_PROMPT en backend).
+        # Cualquier prompt enviado por el usuario se ignora para garantizar
+        # consistencia en la interpretación de la imagen.
+        if modo == "image":
+            prompt_usuario = ""
         opciones_raw = request.data.get("opciones")
         opciones = {}
         if isinstance(opciones_raw, dict):
@@ -220,6 +226,101 @@ class PlanoViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Punto 1 — Endpoint dedicado: analizar imagen sin prompt del usuario
+    # Recibe únicamente la imagen; el prompt es 100% estático en el backend.
+    # El frontend no necesita enviar ningún texto libre.
+    # ──────────────────────────────────────────────────────────────────────────
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="analizar-imagen",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def analizar_imagen(self, request, pk=None):
+        """Analiza una imagen de plano con prompt 100% estático. Sin input del usuario."""
+        plano = self.get_object()
+
+        upload = request.FILES.get("file") or request.FILES.get("image")
+        if not upload:
+            return Response(
+                {"detail": "Debes enviar la imagen del plano en el campo 'file'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        max_mb = 10
+        if getattr(upload, "size", 0) and upload.size > max_mb * 1024 * 1024:
+            return Response(
+                {"detail": f"La imagen es demasiado grande (máximo {max_mb}MB)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from PIL import Image, ImageEnhance, ImageOps
+        except Exception:
+            return Response(
+                {"detail": "Pillow no está instalado en el backend."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        try:
+            img = Image.open(upload)
+            img = ImageOps.exif_transpose(img)
+            img = img.convert("RGB")
+            img = ImageOps.autocontrast(img)
+            img = ImageEnhance.Sharpness(img).enhance(1.6)
+            if max(img.size) > 3072:
+                img.thumbnail((3072, 3072))
+
+            # Llama a la función dedicada del Punto 1 (prompt estático, sin usuario)
+            result = analizar_imagen_plano(image_pil=img)
+
+            from .services.vector_postprocess import postprocess_vector_data
+            processed, _stats = postprocess_vector_data(result.vector_data)
+
+            from .services.scale_service import infer_escala_metros_por_pixel
+            inferred = infer_escala_metros_por_pixel(processed)
+            escala = float(inferred.metros_por_pixel) if inferred else None
+
+            plano.datos_vectoriales = processed
+            plano.modo_generacion = "image"
+            plano.prompt_usuario = ""  # sin prompt de usuario
+            plano.opciones_generacion = {}
+            update_fields = ["datos_vectoriales", "modo_generacion", "prompt_usuario", "opciones_generacion", "actualizado_en"]
+            if escala is not None:
+                plano.escala_metros_por_pixel = escala
+                update_fields.append("escala_metros_por_pixel")
+            plano.save(update_fields=update_fields)
+
+            previews = None
+            try:
+                previews = generar_pack_previews(processed, {})
+            except Exception:
+                logger.exception("No se pudieron generar previews del plano")
+
+            return Response(
+                {
+                    "vector_data": processed,
+                    "previews": previews,
+                    "escala_metros_por_pixel": escala,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except GeminiServiceError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.exception("Fallo en analizar-imagen")
+            if getattr(settings, "DEBUG", False):
+                return Response(
+                    {"detail": f"Error inesperado. ({type(e).__name__}: {e})"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+            return Response(
+                {"detail": "Error inesperado procesando la imagen."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 class AmbienteViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]

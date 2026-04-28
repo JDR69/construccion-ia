@@ -2,8 +2,9 @@ import { http } from './config'
 
 const BASE = '/api/presupuestos/'
 
-export async function getPresupuestoItems() {
-  const res = await http.get(`${BASE}items/`)
+export async function getPresupuestoItems(presupuestoId) {
+  if (!presupuestoId) return []
+  const res = await http.get(`${BASE}${presupuestoId}/items/`)
   return res.data
 }
 

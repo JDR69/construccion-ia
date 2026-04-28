@@ -1,9 +1,11 @@
+from django.http import HttpResponse
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .models import AuditoriaPresupuesto, Presupuesto, PresupuestoItem
 from .services.estimacion_service import generar_items_presupuesto
+from .services.pdf_service import generar_pdf_presupuesto
 from .serializers import (
     AuditoriaPresupuestoSerializer,
     PresupuestoItemSerializer,
@@ -89,6 +91,22 @@ class PresupuestoViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["get"], url_path="exportar-pdf")
+    def exportar_pdf(self, request, pk=None):
+        presupuesto = self.get_object()
+        pdf_buffer = generar_pdf_presupuesto(presupuesto)
+        
+        response = HttpResponse(pdf_buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Presupuesto_{presupuesto.id}.pdf"'
+        return response
+
+    @action(detail=True, methods=["get"], url_path="items")
+    def obtener_items(self, request, pk=None):
+        presupuesto = self.get_object()
+        items = presupuesto.items.all().select_related("material").order_by("id")
+        serializer = PresupuestoItemSerializer(items, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class PresupuestoItemViewSet(viewsets.ModelViewSet):

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
   getPlano,
+  analizarImagenPlano,
   procesarPlanoIA,
   updateDatosVectoriales,
 } from '../api/planos'
@@ -167,6 +168,40 @@ export function useEditorPlano(proyectoId) {
 
   const procesarIA = useCallback(async (payload) => handleUploadIA(payload), [handleUploadIA])
 
+  /**
+   * Punto 1 — Analiza imagen sin prompt del usuario.
+   * Llama directamente al endpoint dedicado /analizar-imagen/.
+   */
+  const analizarImagenIA = useCallback(
+    async (file) => {
+      if (!planoData?.id) return null
+      if (!file) return null
+      setError('')
+      setIsProcessingIA(true)
+      try {
+        const response = await analizarImagenPlano(planoData.id, file)
+        const json = Array.isArray(response)
+          ? response
+          : (Array.isArray(response?.vector_data) ? response.vector_data : [])
+        const escala = response?.escala_metros_por_pixel
+        setPlanoData((prev) => (prev
+          ? {
+              ...prev,
+              datos_vectoriales: json,
+              ...(escala != null ? { escala_metros_por_pixel: escala } : {}),
+            }
+          : prev))
+        return response
+      } catch (e) {
+        setError(String(toErrorMessage(e)))
+        throw e
+      } finally {
+        setIsProcessingIA(false)
+      }
+    },
+    [planoData?.id]
+  )
+
   const addElemento = useCallback(
     (tipo) => {
       const current = Array.isArray(datosVectoriales) ? datosVectoriales : []
@@ -313,6 +348,7 @@ export function useEditorPlano(proyectoId) {
       saveDatosVectoriales,
       handleUploadIA,
       procesarIA,
+      analizarImagenIA,
       addElemento,
       addTexto,
       addCota,
@@ -330,6 +366,7 @@ export function useEditorPlano(proyectoId) {
       saveDatosVectoriales,
       handleUploadIA,
       procesarIA,
+      analizarImagenIA,
       addElemento,
       addTexto,
       addCota,

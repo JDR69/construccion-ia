@@ -176,7 +176,11 @@ def construir_prompt_dinamico(*, modo: str, prompt_usuario: str = "", opciones: 
         lineas_extra.append("Preferencias guiadas:")
         for key, value in limpio.items():
             lineas_extra.append(f"- {key}: {value}")
-    if prompt_usuario:
+
+    # En modo 'image' el prompt es 100% estático (SYSTEM_PROMPT).
+    # No se agrega ningún texto libre del usuario para garantizar
+    # resultados consistentes y predecibles (Punto 1).
+    if prompt_usuario and modo != "image":
         lineas_extra.append(f"Indicaciones del usuario: {prompt_usuario.strip()}")
 
     lineas_extra.append(
@@ -771,3 +775,27 @@ def procesar_plano_con_gemini(
         else:
             msg = "No se pudo procesar el plano con IA. Intenta nuevamente."
         raise GeminiServiceError(msg) from e
+
+
+def analizar_imagen_plano(*, image_pil) -> GeminiParseResult:
+    """
+    Punto 1 — Procesamiento de imagen sin prompt del usuario.
+
+    Esta función es la entrada dedicada para analizar una imagen de plano
+    arquitectónico. Usa únicamente el SYSTEM_PROMPT estático definido en el
+    backend; el usuario no ingresa ningún contexto ni prompt libre.
+
+    Esto garantiza interpretaciones consistentes y predecibles: la IA siempre
+    sabe exactamente qué debe extraer (muros, puertas, ventanas) sin verse
+    influenciada por instrucciones variables del usuario.
+    """
+    if image_pil is None:
+        raise GeminiServiceError(
+            "Debes enviar una imagen del plano para analizarla."
+        )
+    return procesar_plano_con_gemini(
+        image_pil=image_pil,
+        prompt_usuario="",   # jamás acepta texto libre del usuario
+        opciones=None,       # sin preferencias adicionales del usuario
+        modo="image",
+    )
