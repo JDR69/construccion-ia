@@ -1,3 +1,4 @@
+import os
 from decimal import Decimal
 
 from django.db import transaction
@@ -198,14 +199,18 @@ def _generar_items_desde_plano_ia(presupuesto: Presupuesto) -> int:
     if len(ventanas) > 0:
         requerimientos.append({"nombre": "ventana", "unidad": "unidad", "cantidad": Decimal(len(ventanas)), "precio_fallback": Decimal("250.00")})
 
-    # 4. Forzar Scraper para tener precios actualizados reales
+    # 4. Scraper (NO recomendado dentro de requests en producción)
     nombres_materiales = [req["nombre"] for req in requerimientos]
-    try:
-        from materials.services.scraper_service import buscar_precios
-        # Busca y actualiza en BD si los precios son viejos
-        buscar_precios(nombres_materiales, persistir=True, max_age_hours=168)
-    except Exception:
-        pass  # Si falla el scraper, usamos lo que haya en la base de datos local
+    _scrape_en_request = os.getenv("SCRAPER_SYNC_IN_REQUEST", "").lower() in {"1", "true", "yes", "on"}
+    if _scrape_en_request:
+        try:
+            from materials.services.scraper_service import buscar_precios
+
+            # Busca y actualiza en BD si los precios son viejos.
+            # OJO: puede demorar; en producción es mejor hacerlo con un Cron Job.
+            buscar_precios(nombres_materiales, persistir=True, max_age_hours=168)
+        except Exception:
+            pass  # Si falla el scraper, usamos lo que haya en la base de datos
 
     creados = 0
     omitidos: list[dict[str, str]] = []
