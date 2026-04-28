@@ -64,8 +64,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -150,6 +150,9 @@ _cors_defaults = [
 
 # Preserva orden y evita duplicados
 CORS_ALLOWED_ORIGINS = list(dict.fromkeys([*_cors_defaults, *_cors_env_list]))
+
+# Si usas Authorization header o cookies en el frontend
+CORS_ALLOW_CREDENTIALS = True
 
 # Simple JWT
 SIMPLE_JWT = {
