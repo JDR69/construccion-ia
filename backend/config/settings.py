@@ -109,6 +109,7 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
@@ -127,12 +128,20 @@ REST_FRAMEWORK = {
     ],
 }
 
-# CORS (dev-friendly)
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
-else:
-    _cors = os.getenv("CORS_ALLOWED_ORIGINS", "")
-    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors.split(",") if o.strip()]
+# CORS
+# Puedes extender/override con la variable de entorno `CORS_ALLOWED_ORIGINS`
+# (lista separada por comas).
+_cors_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
+_cors_env_list = [o.strip() for o in _cors_env.split(",") if o.strip()]
+
+_cors_defaults = [
+    "https://construccion-ia.netlify.app",
+    "https://TU-SITIO-AQUI.netlify.app",
+    "http://localhost:5173",
+]
+
+# Preserva orden y evita duplicados
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys([*_cors_defaults, *_cors_env_list]))
 
 # Simple JWT
 SIMPLE_JWT = {
