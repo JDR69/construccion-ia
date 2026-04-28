@@ -31,6 +31,26 @@ function formatMoney(value) {
   }).format(Number(value || 0))
 }
 
+function calcularTotalDesdeItems(items) {
+  if (!Array.isArray(items) || items.length === 0) return 0
+
+  // Trabajar en centavos para evitar errores de coma flotante.
+  const totalCentavos = items.reduce((acc, item) => {
+    const subtotal = Number(item?.subtotal)
+    if (Number.isFinite(subtotal)) return acc + Math.round(subtotal * 100)
+
+    const cantidad = Number(item?.cantidad)
+    const precioUnit = Number(item?.precio_unitario)
+    if (Number.isFinite(cantidad) && Number.isFinite(precioUnit)) {
+      return acc + Math.round(cantidad * precioUnit * 100)
+    }
+
+    return acc
+  }, 0)
+
+  return totalCentavos / 100
+}
+
 /* Helper para mostrar errores */
 function toErrorMessage(err) {
   return (
@@ -246,7 +266,17 @@ export function EstimacionModal({ open, onClose, proyecto }) {
     )
   }
 
-  const totalEstimado = resumen?.total_estimado ?? presupuesto?.total ?? 0
+  const totalDesdeItems = calcularTotalDesdeItems(items)
+
+  const totalDesdeResumen = (() => {
+    if (!resumen) return 0
+    if (modo === 'rapido') return resumen?.total_estimado ?? resumen?.rapido?.total_estimado ?? 0
+    if (modo === 'refinado') return resumen?.total_estimado ?? resumen?.refinado?.total_estimado ?? 0
+    if (modo === 'hibrido') return resumen?.refinado?.total_estimado ?? resumen?.rapido?.total_estimado ?? 0
+    return resumen?.total_estimado ?? 0
+  })()
+
+  const totalEstimado = totalDesdeItems || totalDesdeResumen || presupuesto?.total || 0
 
   return (
     <Modal
