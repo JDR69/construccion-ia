@@ -6,7 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from .services.gemini_service import GeminiServiceError, analizar_imagen_plano, procesar_plano_con_gemini
+from .services.gemini_service import GeminiServiceError, procesar_plano_con_gemini
 from .services.preview_service import generar_pack_previews
 from .services.scale_service import infer_escala_metros_por_pixel
 from .services.vector_postprocess import postprocess_vector_data
@@ -274,7 +274,14 @@ class PlanoViewSet(viewsets.ModelViewSet):
                 img.thumbnail((3072, 3072))
 
             # Llama a la función dedicada del Punto 1 (prompt estático, sin usuario)
-            result = analizar_imagen_plano(image_pil=img)
+            # El usuario ha solicitado forzar el uso de OpenAI para esto.
+            from .services.openai_service import procesar_plano_con_openai
+            result = procesar_plano_con_openai(
+                image_pil=img,
+                prompt_usuario="",
+                opciones={},
+                modo="image"
+            )
 
             from .services.vector_postprocess import postprocess_vector_data
             processed, _stats = postprocess_vector_data(result.vector_data)
