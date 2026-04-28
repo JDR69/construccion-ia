@@ -7,6 +7,22 @@ def normalizar_material(material: str) -> str:
     return material.strip().lower()
 
 
+def coincide_material(material_buscado: str, descripcion: str) -> bool:
+    """Comprueba si una descripcion corresponde al material buscado sin capturar accesorios.
+
+    La coincidencia exige que la descripcion empiece con el material buscado
+    (aceptando plural simple), para evitar que terminos como "rulemanes para
+    ventanas" o "riles de ventana" se tomen como si fueran la ventana principal.
+    """
+    material = normalizar_material(material_buscado)
+    texto = normalizar_material(descripcion)
+    if not material or not texto:
+        return False
+
+    patron = rf"^{re.escape(material)}s?(?:\b|[-/])"
+    return re.search(patron, texto) is not None
+
+
 def normalizar_precio(texto: str) -> Optional[float]:
     """Convierte textos como 'Bs 1.250,50' o 'BOB 50' en float."""
     if not texto:

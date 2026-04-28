@@ -172,6 +172,7 @@ export function EditorPage() {
         <EditorWorkspace
           ref={workspaceRef}
           datosVectoriales={Array.isArray(datosVectoriales) ? datosVectoriales : []}
+          planoId={planoData?.id}
           onChange={setDatosVectorialesLocal}
           onBack={() => navigate(-1)}
           onClear={onClear}

@@ -22,14 +22,14 @@ AJUSTE_POR_AMBIENTE = {
 }
 
 
-def _obtener_material(nombre: str, unidad: str) -> Material:
-    material, _ = Material.objects.get_or_create(
-        nombre=nombre,
-        defaults={"unidad": unidad},
-    )
-    if not material.unidad and unidad:
-        material.unidad = unidad
-        material.save(update_fields=["unidad", "actualizado_en"])
+def _obtener_material(nombre: str, unidad: str) -> Material | None:
+    material = Material.objects.filter(nombre__iexact=nombre).first()
+    if not material:
+        return None
+    if material.unidad or not unidad:
+        return material
+    material.unidad = unidad
+    material.save(update_fields=["unidad", "actualizado_en"])
     return material
 
 
@@ -208,19 +208,21 @@ def _generar_items_desde_plano_ia(presupuesto: Presupuesto) -> int:
         pass  # Si falla el scraper, usamos lo que haya en la base de datos local
 
     creados = 0
+    omitidos: list[dict[str, str]] = []
     for req in requerimientos:
         if req["cantidad"] <= 0:
             continue
         material = _obtener_material(req["nombre"], req["unidad"])
-        
-        # Obtenemos precio de BD o usamos fallback si el scraper falló y es 0
-        precio_bd = Decimal(str(material.precio_referencial or 0)).quantize(Decimal("0.01"))
-        precio_unitario = precio_bd if precio_bd > 0 else req["precio_fallback"]
+        if not material:
+            omitidos.append({"nombre": req["nombre"], "motivo": "no existe en el catalogo"})
+            continue
 
-        # Si usamos fallback y en bd está en 0, lo actualizamos por consistencia
-        if precio_bd == 0:
-            material.precio_referencial = precio_unitario
-            material.save(update_fields=["precio_referencial", "actualizado_en"])
+        precio_bd = Decimal(str(material.precio_referencial or 0)).quantize(Decimal("0.01"))
+        if precio_bd <= 0:
+            omitidos.append({"nombre": req["nombre"], "motivo": "sin precio referencial"})
+            continue
+
+        precio_unitario = precio_bd
 
         PresupuestoItem.objects.create(
             presupuesto=presupuesto,
@@ -268,6 +270,7 @@ def generar_items_presupuesto(
         factor_refinado = Decimal("1.00")
 
         creados = 0
+        omitidos: list[dict[str, str]] = []
         for base in COEFICIENTES_BASE_M2:
             nombre_material = base["material"]
             unidad = base["unidad"]
@@ -279,7 +282,14 @@ def generar_items_presupuesto(
                 continue
 
             material = _obtener_material(nombre_material, unidad)
+            if not material:
+                omitidos.append({"nombre": nombre_material, "motivo": "no existe en el catalogo"})
+                continue
+
             precio_unitario = Decimal(str(material.precio_referencial or 0)).quantize(Decimal("0.01"))
+            if precio_unitario <= 0:
+                omitidos.append({"nombre": nombre_material, "motivo": "sin precio referencial"})
+                continue
 
             PresupuestoItem.objects.create(
                 presupuesto=presupuesto,
@@ -294,5 +304,6 @@ def generar_items_presupuesto(
         "area_m2": float(area_m2),
         "factor_refinado": float(factor_refinado),
         "items_creados": creados,
+        "materiales_omitidos": omitidos,
         "total_estimado": float(presupuesto.total),
     }

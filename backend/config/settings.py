@@ -24,6 +24,7 @@ GEMINI_MODEL_STRONG = os.getenv("GEMINI_MODEL_STRONG", "").strip()
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1").strip()
 
 # Selector de proveedor IA para procesar planos: gemini | openai
 IA_PROVIDER = os.getenv("IA_PROVIDER", "gemini").strip().lower()

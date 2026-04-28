@@ -8,7 +8,7 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
-from materials.services.utils.normalizer import normalizar_material, normalizar_precio
+from materials.services.utils.normalizer import coincide_material, normalizar_material, normalizar_precio
 
 logger = logging.getLogger(__name__)
 
@@ -157,15 +157,7 @@ def _parse_rows(rows: list[dict[str, Any]], *, ciudad_id: str, ciudad_nombre: st
 
 
 def _material_coincide(descripcion_norm: str, material_buscado: str) -> bool:
-    if material_buscado in descripcion_norm:
-        return True
-    if descripcion_norm in material_buscado:
-        return True
-
-    primera_palabra = material_buscado.split()[0]
-    if len(primera_palabra) >= 4 and primera_palabra in descripcion_norm:
-        return True
-    return False
+    return coincide_material(material_buscado, descripcion_norm)
 
 
 def obtener_catalogo_insucons(timeout: int = 12, *, force_refresh: bool = False) -> list[dict[str, Any]]:

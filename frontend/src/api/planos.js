@@ -66,3 +66,8 @@ export async function analizarImagenPlano(planoId, file) {
 
   return res.data
 }
+
+export async function chatbotPlano(planoId, payload) {
+  const res = await http.post(`${BASE}${planoId}/chatbot/`, payload)
+  return res.data
+}

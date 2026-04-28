@@ -7,6 +7,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from .services.gemini_service import GeminiServiceError, procesar_plano_con_gemini
+from .services.chatbot_service import ChatbotServiceError, procesar_chatbot_plano
 from .services.preview_service import generar_pack_previews
 from .services.scale_service import infer_escala_metros_por_pixel
 from .services.vector_postprocess import postprocess_vector_data
@@ -14,7 +15,7 @@ from django.conf import settings
 
 from .models import Ambiente, Plano
 from .serializers import AmbienteSerializer, PlanoSerializer
-
+    
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +226,43 @@ class PlanoViewSet(viewsets.ModelViewSet):
                 {"detail": "Error inesperado procesando la imagen."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    @action(detail=True, methods=["post"], url_path="chatbot")
+    def chatbot(self, request, pk=None):
+        """Chatbot para editar el plano con lenguaje natural."""
+        plano = self.get_object()
+
+        mensaje = str(request.data.get("message") or "").strip()
+        if not mensaje:
+            return Response(
+                {"detail": "El campo 'message' es obligatorio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        shapes = request.data.get("shapes")
+        if shapes is None:
+            shapes = plano.datos_vectoriales if isinstance(plano.datos_vectoriales, list) else []
+
+        if not isinstance(shapes, list):
+            return Response(
+                {"detail": "El campo 'shapes' debe ser una lista."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        history = request.data.get("history") or []
+        selected_id = request.data.get("selected_id")
+
+        try:
+            parsed = procesar_chatbot_plano(
+                message=mensaje,
+                shapes=shapes,
+                selected_id=selected_id,
+                history=history,
+            )
+        except ChatbotServiceError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(parsed, status=status.HTTP_200_OK)
 
 
     # ──────────────────────────────────────────────────────────────────────────

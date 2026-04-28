@@ -9,7 +9,7 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
-from materials.services.utils.normalizer import normalizar_material, normalizar_precio
+from materials.services.utils.normalizer import coincide_material, normalizar_material, normalizar_precio
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ def scraper_ferrocenter(material: str, timeout: int = 10) -> list[dict[str, Any]
             continue
 
         nombre_norm = normalizar_material(nombre)
-        if material_norm not in nombre_norm:
+        if not coincide_material(material_norm, nombre_norm):
             continue
 
         # Extraer precio

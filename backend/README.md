@@ -31,6 +31,7 @@ IA_PROVIDER=gemini
 # IA_PROVIDER=openai
 # OPENAI_API_KEY=TU_API_KEY_AQUI
 # OPENAI_MODEL=gpt-4o-mini
+# OPENAI_CHAT_MODEL=gpt-4.1
 "@ | Set-Content .env -Encoding UTF8
 
 

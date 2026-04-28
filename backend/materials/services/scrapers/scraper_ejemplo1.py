@@ -6,7 +6,7 @@ from urllib.parse import quote_plus
 import requests
 from bs4 import BeautifulSoup
 
-from materials.services.utils.normalizer import normalizar_material, normalizar_precio
+from materials.services.utils.normalizer import coincide_material, normalizar_material, normalizar_precio
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def scraper_ejemplo1(material: str, timeout: int = 8) -> list[dict[str, Any]]:
         nombre = normalizar_material(nombre_raw)
         if not nombre or nombre in textos_ignorar:
             continue
-        if material_buscado not in nombre:
+        if not coincide_material(material_buscado, nombre):
             continue
 
         precio = _extraer_precio_desde_contexto(enlace)

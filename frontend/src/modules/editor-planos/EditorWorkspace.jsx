@@ -3,12 +3,15 @@ import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import { CanvasBoard } from './CanvasBoard'
 import { EditorToolbar } from './EditorToolbar'
 import { ElementsPalette } from './ElementsPalette'
+import { PlanoChatbotPanel } from './PlanoChatbotPanel'
 import { Modal } from '../../ui/Modal'
 import { Button } from '../../ui/Button'
+import { usePlanoChatbot } from '../../hooks/usePlanoChatbot'
 
 export const EditorWorkspace = forwardRef(function EditorWorkspace(
   {
     datosVectoriales,
+    planoId,
     onChange,
     onBack,
     onClear,
@@ -37,16 +40,25 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
   const [canUndoState, setCanUndoState] = useState(false)
   const [canRedoState, setCanRedoState] = useState(false)
   const [zoomLevelState, setZoomLevelState] = useState('100%')
+  const [showChat, setShowChat] = useState(false)
 
   // Punto 3: Modal de configuración previa
   const [pendingDrop, setPendingDrop] = useState(null)
   const [formDims, setFormDims] = useState({ largo: 1, grosor: 0.15, rotacion: 0 })
+
+  const {
+    history,
+    isComposing,
+    error,
+    processMessage,
+  } = usePlanoChatbot({ planoId, canvasRef })
 
   useImperativeHandle(
     ref,
     () => ({
       exportarJpg: () => canvasRef.current?.exportarJpg?.(),
       exportarPdf: () => canvasRef.current?.exportarPdf?.(),
+      getCanvasBoard: () => canvasRef.current,
     }),
     [],
   )
@@ -293,6 +305,25 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
       <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 pointer-events-auto">
         <ElementsPalette isDark={isDark} />
       </div>
+
+      {/* ── Boton de chatbot ─────────────────────────────────────────── */}
+      <div className="absolute right-4 bottom-24 z-30 pointer-events-auto">
+        <Button variant="secondary" size="sm" onClick={() => setShowChat(true)}>
+          Chat IA
+        </Button>
+      </div>
+
+      {showChat ? (
+        <div className="absolute right-4 bottom-40 z-40 pointer-events-auto">
+          <PlanoChatbotPanel
+            history={history}
+            isComposing={isComposing}
+            error={error}
+            onSend={processMessage}
+            onClose={() => setShowChat(false)}
+          />
+        </div>
+      ) : null}
 
       {/* ── Toolbar inferior ─────────────────────────────────────────── */}
       <div className="absolute left-0 right-0 bottom-0 z-20 pointer-events-none">

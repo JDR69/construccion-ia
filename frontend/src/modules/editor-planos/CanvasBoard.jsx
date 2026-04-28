@@ -554,6 +554,9 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
   const [size, setSize] = useState({ width: 300, height: 300 })
   const [selectedIds, setSelectedIds] = useState([])
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
+
+  const selectionListenersRef = useRef(new Set())
+  const historyListenersRef = useRef(new Set())
   
   const [stageScale, setStageScale] = useState(1)
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
@@ -597,6 +600,14 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
   }, [])
 
   const shapes = useMemo(() => normalizarFormas(datosVectoriales), [datosVectoriales])
+
+  const muroIndexById = useMemo(() => {
+    const muros = shapes.filter((s) => s?.tipo === 'muro')
+    const sorted = [...muros].sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    const map = new Map()
+    sorted.forEach((s, i) => map.set(s.id, i + 1))
+    return map
+  }, [shapes])
 
   // ── Historial (Undo / Redo) ──────────────────────────────────────────
   const [history, setHistory] = useState([])
@@ -652,6 +663,18 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     [selectedId, shapes]
   )
 
+  useEffect(() => {
+    selectionListenersRef.current.forEach((cb) => cb(selectedId))
+  }, [selectedId])
+
+  useEffect(() => {
+    const payload = {
+      canUndo: historyStep > 0,
+      canRedo: historyStep < history.length - 1,
+    }
+    historyListenersRef.current.forEach((cb) => cb(payload))
+  }, [historyStep, history.length])
+
   // ── Abrir editor de texto inline ─────────────────────────────────────
   const abrirEditorTexto = useCallback((s, nodeOrPos) => {
     const stageEl = stageRef.current?.container()
@@ -676,7 +699,7 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     if (!editingId) return
     if (guardar) {
       // Actualizamos el JSON directamente sin pasar por actualizarForma
-      // (que se define más abajo) para evitar dependencia circular.
+      // (se define en este componente) para evitar dependencia circular.
       const shape = shapes.find((ss) => ss.id === editingId)
       if (shape) {
         const patch =
@@ -692,6 +715,48 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     setEditingId(null)
     setEditingText('')
   }, [editingId, editingText, shapes, dispatchChange])
+
+  const muroTieneConflicto = (id, rectCandidate) => {
+    if (!rectCandidate) return false
+    return shapes.some((s) => {
+      if (!s) return false
+      if (s.id === id) return false
+      if (s.tipo !== 'muro') return false
+      const otherRect = {
+        x: Number(s.x) || 0,
+        y: Number(s.y) || 0,
+        width: Number(s.width) || 0,
+        height: Number(s.height) || 0,
+      }
+      return rectangulosSeSolapan(rectCandidate, otherRect)
+    })
+  }
+
+  const actualizarForma = (id, patch) => {
+    const actual = shapes.find((s) => s.id === id)
+    if (!actual) return true
+
+    const actualizado = { ...actual, ...patch }
+
+    if (actualizado.tipo === 'muro') {
+      const node = shapeRefs.current[id]
+      const rect =
+        clientRectDeNode(node) ??
+        {
+          x: Number(actualizado.x) || 0,
+          y: Number(actualizado.y) || 0,
+          width: Number(actualizado.width) || 0,
+          height: Number(actualizado.height) || 0,
+        }
+
+      const haySolape = muroTieneConflicto(id, rect)
+      if (haySolape) return false
+    }
+
+    const next = shapes.map((s) => (s.id === id ? actualizado : s))
+    dispatchChange(next)
+    return true
+  }
 
   const aplicarRotacionSeleccion = (grados) => {
     if (!selectedId) return
@@ -809,9 +874,9 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     pdf.save(`${name}.pdf`)
   }
 
-  useImperativeHandle(ref, () => ({ 
-    exportarJpg, 
-    exportarPdf, 
+  useImperativeHandle(ref, () => ({
+    exportarJpg,
+    exportarPdf,
     zoomToFit,
     zoomIn: () => setStageScale(s => Math.min(s * 1.2, 3)),
     zoomOut: () => setStageScale(s => Math.max(s / 1.2, 0.2)),
@@ -820,7 +885,47 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     redo,
     canUndo: historyStep > 0,
     canRedo: historyStep < history.length - 1,
-  }), [stageScale, historyStep, history.length])
+    getSelectedTypeId: () => selectedId,
+    getShapes: () => shapes,
+    addRectangle: ({ x, y, width, height, tipo, rotation = 0 }) => {
+      const id = `${tipo || 'shape'}-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+      const next = [
+        ...shapes,
+        { id, tipo, x, y, width, height, rotation },
+      ]
+      dispatchChange(next)
+      return id
+    },
+    updateShape: (id, patch) => actualizarForma(id, patch),
+    deleteShape: (id) => {
+      const next = shapes.filter((s) => s.id !== id)
+      dispatchChange(next)
+      if (selectedIds.includes(id)) {
+        setSelectedIds((prev) => prev.filter((s) => s !== id))
+      }
+    },
+    onSelectionChange: (cb) => {
+      if (typeof cb !== 'function') return () => {}
+      selectionListenersRef.current.add(cb)
+      return () => selectionListenersRef.current.delete(cb)
+    },
+    onHistoryChange: (cb) => {
+      if (typeof cb !== 'function') return () => {}
+      historyListenersRef.current.add(cb)
+      return () => historyListenersRef.current.delete(cb)
+    },
+  }), [
+    stageScale,
+    historyStep,
+    history.length,
+    selectedId,
+    shapes,
+    selectedIds,
+    dispatchChange,
+    actualizarForma,
+    undo,
+    redo,
+  ])
 
   const grid = useMemo(() => {
     const spacing = 50
@@ -1016,48 +1121,6 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
     })
 
     dispatchChange(nextShapes)
-  }
-
-  const muroTieneConflicto = (id, rectCandidate) => {
-    if (!rectCandidate) return false
-    return shapes.some((s) => {
-      if (!s) return false
-      if (s.id === id) return false
-      if (s.tipo !== 'muro') return false
-      const otherRect = {
-        x: Number(s.x) || 0,
-        y: Number(s.y) || 0,
-        width: Number(s.width) || 0,
-        height: Number(s.height) || 0,
-      }
-      return rectangulosSeSolapan(rectCandidate, otherRect)
-    })
-  }
-
-  const actualizarForma = (id, patch) => {
-    const actual = shapes.find((s) => s.id === id)
-    if (!actual) return true
-
-    const actualizado = { ...actual, ...patch }
-
-    if (actualizado.tipo === 'muro') {
-      const node = shapeRefs.current[id]
-      const rect =
-        clientRectDeNode(node) ??
-        {
-          x: Number(actualizado.x) || 0,
-          y: Number(actualizado.y) || 0,
-          width: Number(actualizado.width) || 0,
-          height: Number(actualizado.height) || 0,
-        }
-
-      const haySolape = muroTieneConflicto(id, rect)
-      if (haySolape) return false
-    }
-
-    const next = shapes.map((s) => (s.id === id ? actualizado : s))
-    dispatchChange(next)
-    return true
   }
 
   useEffect(() => {
@@ -1592,6 +1655,48 @@ export const CanvasBoard = forwardRef(function CanvasBoard(
               }}
             />
           ))}
+
+          {/* ── Etiquetas numeradas para muros ── */}
+          {modoExport
+            ? null
+            : shapes.filter((s) => s.tipo === 'muro').map((s) => {
+              const num = muroIndexById.get(s.id)
+              if (!num) return null
+              const w = Number(s.width) || 0
+              const h = Number(s.height) || 0
+              const cx = (Number(s.x) || 0) + w / 2
+              const cy = (Number(s.y) || 0) + h / 2
+              const label = `M${num}`
+              const bg = isDark ? 'rgba(15,23,42,0.85)' : 'rgba(255,255,255,0.9)'
+              const border = isDark ? '#38BDF8' : '#0F172A'
+              const textCol = isDark ? '#E2E8F0' : '#0F172A'
+
+              return (
+                <Group key={`muro-label-${s.id}`} x={cx} y={cy} listening={false}>
+                  <Rect
+                    x={-14}
+                    y={-10}
+                    width={28}
+                    height={20}
+                    fill={bg}
+                    stroke={border}
+                    strokeWidth={1}
+                    cornerRadius={6}
+                  />
+                  <Text
+                    x={-14}
+                    y={-6}
+                    width={28}
+                    text={label}
+                    fontSize={11}
+                    align="center"
+                    fill={textCol}
+                    fontFamily="ui-monospace, SFMono-Regular, monospace"
+                    fontStyle="bold"
+                  />
+                </Group>
+              )
+            })}
 
           {/* ── Overlay símbolo arquitectónico de PUERTA ── */}
           {shapes.filter((s) => s.tipo === 'puerta').map((s) => {

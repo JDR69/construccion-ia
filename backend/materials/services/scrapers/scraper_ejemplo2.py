@@ -6,7 +6,7 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
-from materials.services.utils.normalizer import normalizar_material, normalizar_precio
+from materials.services.utils.normalizer import coincide_material, normalizar_material, normalizar_precio
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def _extraer_desde_rows(rows: list[dict[str, Any]], material_buscado: str) -> li
             continue
 
         descripcion = normalizar_material(str(celdas[2]))
-        if material_buscado not in descripcion:
+        if not coincide_material(material_buscado, descripcion):
             continue
 
         precio = normalizar_precio(str(celdas[4]))
