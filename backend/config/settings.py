@@ -34,6 +34,14 @@ IA_PROVIDER = os.getenv("IA_PROVIDER", "gemini").strip().lower()
 _allowed_hosts = os.getenv("DJANGO_ALLOWED_HOSTS", "")
 ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts.split(",") if h.strip()]
 
+# Defaults razonables si no se configuró DJANGO_ALLOWED_HOSTS
+if not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = [
+        "localhost",
+        "127.0.0.1",
+        "construccion-ia.onrender.com",
+    ]
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
